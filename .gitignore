@@ -1,0 +1,8 @@
+bin/
+obj/
+publish/
+history.json
+settings.json
+.build-appdata/
+.dotnet-home/
+.nuget/
