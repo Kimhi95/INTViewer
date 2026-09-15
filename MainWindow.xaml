@@ -5,7 +5,8 @@
         Background="{DynamicResource WindowBackgroundBrush}" Foreground="{DynamicResource PrimaryTextBrush}"
         FontFamily="Segoe UI Variable Display, Segoe UI"
         AllowDrop="True" Drop="Window_Drop" DragOver="Window_DragOver"
-        PreviewKeyDown="Window_PreviewKeyDown" PreviewMouseWheel="Window_PreviewMouseWheel">
+        PreviewKeyDown="Window_PreviewKeyDown" PreviewMouseDown="Window_PreviewMouseDown"
+        PreviewMouseWheel="Window_PreviewMouseWheel">
     <Grid x:Name="RootGrid">
         <Grid x:Name="LibraryView" Margin="32">
             <Grid.RowDefinitions>
@@ -21,14 +22,18 @@
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
-                <StackPanel>
-                    <TextBlock Text="INTViewer" FontSize="30" FontWeight="Bold" Foreground="{DynamicResource PrimaryTextBrush}" />
-                    <TextBlock Margin="0,6,0,0" Text="최근 파일을 이어서 열거나 새 텍스트 파일을 추가하세요. 뷰 페이지에서는 Esc로 돌아올 수 있습니다." Foreground="{DynamicResource MutedTextBrush}" />
-                </StackPanel>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+                <TextBlock Text="INTViewer" FontSize="30" FontWeight="Bold" Foreground="{DynamicResource PrimaryTextBrush}" />
                 <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
                     <Button Margin="0,0,8,0" Content="환경설정" Click="SettingsButton_Click" Background="{DynamicResource SecondaryButtonBrush}" Foreground="{DynamicResource SecondaryButtonTextBrush}" />
                     <Button Content="+ 새 파일 열기" Click="OpenFile_Click" />
                 </StackPanel>
+                <TextBlock Grid.Row="1" Grid.ColumnSpan="2" Margin="0,8,0,0" TextWrapping="Wrap"
+                           Text="최근 파일을 이어서 열거나 새 텍스트 파일을 추가하세요. 뷰 페이지에서는 Esc로 돌아올 수 있습니다."
+                           Foreground="{DynamicResource MutedTextBrush}" />
             </Grid>
 
             <Border Grid.Row="2" Background="{DynamicResource PanelBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="12">
@@ -43,6 +48,7 @@
                     <Grid Grid.Row="1">
                         <ListBox x:Name="RecentFilesList" Margin="12,0" BorderThickness="0" Background="Transparent"
                                  Foreground="{DynamicResource PrimaryTextBrush}"
+                                 ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                                  SelectionChanged="RecentFilesList_SelectionChanged">
                             <ListBox.ItemContainerStyle>
                                 <Style TargetType="ListBoxItem">
@@ -87,6 +93,7 @@
                                         <StackPanel Grid.Column="1" Margin="20,0,0,0">
                                             <TextBlock Text="{Binding LastOpenedAt, StringFormat={}{0:yyyy-MM-dd HH:mm}}" HorizontalAlignment="Right" Foreground="{DynamicResource MutedTextBrush}" FontSize="12" />
                                             <TextBlock Margin="0,4,0,0" Text="{Binding StatusText}" HorizontalAlignment="Right" Foreground="{DynamicResource MutedTextBrush}" FontSize="12" />
+                                            <TextBlock Margin="0,4,0,0" Text="{Binding ProgressText}" HorizontalAlignment="Right" Foreground="{DynamicResource PrimaryBrush}" FontSize="12" FontWeight="SemiBold" />
                                         </StackPanel>
                                     </Grid>
                                 </DataTemplate>
@@ -110,11 +117,19 @@
 
             <Border Grid.Row="4" Background="{DynamicResource PanelBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="12" Padding="20,14">
                 <Grid>
-                    <StackPanel>
-                        <TextBlock Text="기록 설정" FontWeight="SemiBold" />
-                        <TextBlock Margin="0,4,0,0" Text="최근 파일 기록은 실행 파일 옆의 history.json에 저장됩니다." Foreground="{DynamicResource MutedTextBrush}" FontSize="12" />
-                    </StackPanel>
-                    <Button Content="최근 기록 모두 지우기" HorizontalAlignment="Right" VerticalAlignment="Center" Click="ClearHistory_Click" Background="{DynamicResource SecondaryButtonBrush}" Foreground="{DynamicResource SecondaryButtonTextBrush}" />
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Text="기록 설정" FontWeight="SemiBold" VerticalAlignment="Center" />
+                    <Button Grid.Column="1" Content="최근 기록 모두 지우기" HorizontalAlignment="Right" VerticalAlignment="Center" Click="ClearHistory_Click" Background="{DynamicResource SecondaryButtonBrush}" Foreground="{DynamicResource SecondaryButtonTextBrush}" />
+                    <TextBlock Grid.Row="1" Grid.ColumnSpan="2" Margin="0,7,0,0" TextWrapping="Wrap"
+                               Text="최근 파일 기록은 실행 파일 옆의 history.json에 저장됩니다."
+                               Foreground="{DynamicResource MutedTextBrush}" FontSize="12" />
                 </Grid>
             </Border>
         </Grid>
@@ -132,30 +147,42 @@
                 <Border x:Name="PageContentArea" Margin="32,28,32,28">
                     <TextBlock x:Name="PageTextBlock" TextWrapping="Wrap" FontFamily="Consolas, Malgun Gothic" FontSize="14" />
                 </Border>
-
-                <Border Height="54" Width="220" VerticalAlignment="Bottom" HorizontalAlignment="Center" Background="Transparent" Panel.ZIndex="10">
-                    <Border.Style>
-                        <Style TargetType="Border">
-                            <Setter Property="Opacity" Value="0.12" />
-                            <Style.Triggers>
-                                <Trigger Property="IsMouseOver" Value="True"><Setter Property="Opacity" Value="1" /></Trigger>
-                            </Style.Triggers>
-                        </Style>
-                    </Border.Style>
-                    <Border Background="#DD111827" CornerRadius="18" Padding="8,4" VerticalAlignment="Center">
-                        <Grid>
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="44" />
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="44" />
-                            </Grid.ColumnDefinitions>
-                            <Button Grid.Column="0" Content="‹" Click="PreviousPage_Click" Padding="4" Background="Transparent" FontSize="20" />
-                            <TextBlock Grid.Column="1" x:Name="PageIndicatorText" Text="1 / 1" Foreground="White" VerticalAlignment="Center" HorizontalAlignment="Center" />
-                            <Button Grid.Column="2" Content="›" Click="NextPage_Click" Padding="4" Background="Transparent" FontSize="20" />
-                        </Grid>
-                    </Border>
-                </Border>
             </Grid>
+
+            <Border Height="54" Width="230" VerticalAlignment="Bottom" HorizontalAlignment="Center" Background="Transparent" Panel.ZIndex="10">
+                <Border.Style>
+                    <Style TargetType="Border">
+                        <Setter Property="Opacity" Value="0.2" />
+                        <Style.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True"><Setter Property="Opacity" Value="1" /></Trigger>
+                            <DataTrigger Binding="{Binding IsKeyboardFocusWithin, RelativeSource={RelativeSource Self}}" Value="True"><Setter Property="Opacity" Value="1" /></DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </Border.Style>
+                <Border Background="#E6111827" CornerRadius="18" Padding="8,4" VerticalAlignment="Center">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="44" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="44" />
+                        </Grid.ColumnDefinitions>
+                        <Button Grid.Column="0" x:Name="PreviousPageButton" Content="‹" Click="PreviousPage_Click" Padding="4" Background="Transparent" FontSize="20" />
+                        <StackPanel Grid.Column="1" x:Name="PositionDisplayPanel" Orientation="Horizontal"
+                                    HorizontalAlignment="Center" VerticalAlignment="Center">
+                            <Grid>
+                                <Button x:Name="CurrentPositionButton" Content="1" Click="CurrentPositionButton_Click"
+                                        Padding="5,2" Background="Transparent" Foreground="White" ToolTip="클릭하여 이동" />
+                                <TextBox x:Name="PositionInputTextBox" Width="68" Padding="5,2" Visibility="Collapsed"
+                                         HorizontalContentAlignment="Center" KeyDown="PositionInputTextBox_KeyDown"
+                                         LostKeyboardFocus="PositionInputTextBox_LostKeyboardFocus" />
+                            </Grid>
+                                <TextBlock Margin="2,0" Text="/" Foreground="#AEB8C7" VerticalAlignment="Center" />
+                                <TextBlock x:Name="TotalPositionText" Text="1" Foreground="White" VerticalAlignment="Center" />
+                        </StackPanel>
+                        <Button Grid.Column="2" x:Name="NextPageButton" Content="›" Click="NextPage_Click" Padding="4" Background="Transparent" FontSize="20" />
+                    </Grid>
+                </Border>
+            </Border>
 
             <Border Width="174" Height="76" HorizontalAlignment="Right" VerticalAlignment="Top" Background="Transparent" Panel.ZIndex="20">
                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">
@@ -176,7 +203,7 @@
                         </Style>
                     </StackPanel.Resources>
                     <Button Content="←" Click="BackToLibrary_Click" ToolTip="목록 페이지" />
-                    <Button Content="⌕" Click="SearchButton_Click" ToolTip="검색 및 이동" />
+                    <Button Content="⌕" Click="SearchButton_Click" ToolTip="검색" />
                     <Button Content="⚙" Click="SettingsButton_Click" ToolTip="환경설정" />
                 </StackPanel>
             </Border>
@@ -300,31 +327,18 @@
                 <Border.Effect><DropShadowEffect BlurRadius="24" ShadowDepth="6" Opacity="0.22" /></Border.Effect>
                 <StackPanel>
                     <Grid Margin="0,0,0,18">
-                        <TextBlock Text="검색 및 이동" FontSize="19" FontWeight="Bold" VerticalAlignment="Center" />
+                        <TextBlock Text="검색" FontSize="19" FontWeight="Bold" VerticalAlignment="Center" />
                         <Button Content="×" HorizontalAlignment="Right" Width="32" Height="32" Padding="0" FontSize="20"
                                 Background="Transparent" Foreground="#344054" Click="CloseSearch_Click" />
                     </Grid>
 
-                    <TextBlock Text="검색" FontWeight="SemiBold" />
-                    <TextBox x:Name="SearchTextBox" Margin="0,10,0,8" Padding="10,7" KeyDown="SearchTextBox_KeyDown" />
+                    <TextBox x:Name="SearchTextBox" Margin="0,0,0,8" Padding="10,7" KeyDown="SearchTextBox_KeyDown" />
                     <Grid Margin="0,0,0,4">
                         <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="8" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
                         <Button Grid.Column="0" Content="이전" Click="FindPrevious_Click" Background="#E5E7EB" Foreground="#344054" />
                         <Button Grid.Column="2" Content="다음" Click="FindNext_Click" />
                     </Grid>
-                    <TextBlock x:Name="SearchResultText" Margin="0,4,0,18" Foreground="#667085" FontSize="12" />
-
-                    <Separator Margin="0,0,0,18" />
-                    <Grid>
-                        <TextBlock Text="이동" FontWeight="SemiBold" />
-                        <TextBlock x:Name="CurrentPositionText" Text="1 / 1" HorizontalAlignment="Right" Foreground="#667085" />
-                    </Grid>
-                    <TextBlock x:Name="MoveDescriptionText" Margin="0,8,0,0" Text="이동할 줄 번호" Foreground="#667085" FontSize="12" />
-                    <Grid Margin="0,8,0,0">
-                        <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="8" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
-                        <TextBox x:Name="MoveTargetTextBox" Padding="10,7" KeyDown="MoveTargetTextBox_KeyDown" />
-                        <Button Grid.Column="2" Content="이동" Click="MoveToTarget_Click" />
-                    </Grid>
+                    <TextBlock x:Name="SearchResultText" Margin="0,4,0,0" Foreground="#667085" FontSize="12" />
                 </StackPanel>
             </Border>
         </Grid>

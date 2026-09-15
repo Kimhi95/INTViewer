@@ -39,14 +39,22 @@ public partial class MainWindow : Window
     private readonly Dictionary<string, MediaFontFamily> _readerFonts = new(StringComparer.CurrentCultureIgnoreCase);
     private readonly DispatcherTimer _repaginationTimer;
     private readonly DispatcherTimer _windowSizeSaveTimer;
+    private readonly DispatcherTimer _readingProgressSaveTimer;
     private ViewerSettings _viewerSettings = ViewerSettings.Default;
     private string _currentText = string.Empty;
     private string _lastSearchQuery = string.Empty;
     private int _searchIndex = -1;
     private int _currentPageIndex;
+    private int _currentPositionValue;
+    private int _totalPositionValue;
+    private string? _currentFilePath;
+    private double _currentReadProgress;
+    private string? _pendingProgressFilePath;
+    private double _pendingProgressValue;
     private bool _isInitializing = true;
     private bool _isUpdatingColorPicker;
     private bool _isEditingBackgroundColor;
+    private bool _isCommittingPosition;
     private CancellationTokenSource? _paginationCancellation;
 
     [DllImport("dwmapi.dll")]
@@ -77,6 +85,18 @@ public partial class MainWindow : Window
             _windowSizeSaveTimer.Stop();
             CaptureWindowSize();
             await SaveViewerSettingsAsync();
+        };
+
+        _readingProgressSaveTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
+        _readingProgressSaveTimer.Tick += async (_, _) =>
+        {
+            _readingProgressSaveTimer.Stop();
+            string? filePath = _pendingProgressFilePath;
+            double progress = _pendingProgressValue;
+            if (string.IsNullOrWhiteSpace(filePath)) return;
+            try { await HistoryStore.UpdateProgressAsync(filePath, progress); }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
         };
         Closing += MainWindow_Closing;
     }
@@ -196,6 +216,13 @@ public partial class MainWindow : Window
 
     private void Window_PreviewKeyDown(object sender, KeyEventArgs e)
     {
+        if (e.Key == Key.Escape && PositionInputTextBox.Visibility == Visibility.Visible)
+        {
+            EndPositionEditing();
+            e.Handled = true;
+            return;
+        }
+
         if (e.Key == Key.Escape && SettingsPanel.Visibility == Visibility.Visible)
         {
             SettingsPanel.Visibility = Visibility.Collapsed;
@@ -229,7 +256,8 @@ public partial class MainWindow : Window
             return;
         }
 
-        if (IsPageMode && SettingsPanel.Visibility != Visibility.Visible && SearchPanel.Visibility != Visibility.Visible)
+        if (IsPageMode && SettingsPanel.Visibility != Visibility.Visible && SearchPanel.Visibility != Visibility.Visible
+            && PositionInputTextBox.Visibility != Visibility.Visible)
         {
             if (e.Key is Key.Right or Key.Down or Key.PageDown or Key.Space)
             {
@@ -247,9 +275,18 @@ public partial class MainWindow : Window
     private void Window_PreviewMouseWheel(object sender, MouseWheelEventArgs e)
     {
         if (!IsPageMode || ViewerView.Visibility != Visibility.Visible ||
-            SettingsPanel.Visibility == Visibility.Visible || SearchPanel.Visibility == Visibility.Visible) return;
+            SettingsPanel.Visibility == Visibility.Visible || SearchPanel.Visibility == Visibility.Visible ||
+            PositionInputTextBox.Visibility == Visibility.Visible) return;
         ShowPage(_currentPageIndex + (e.Delta < 0 ? 1 : -1));
         e.Handled = true;
+    }
+
+    private void Window_PreviewMouseDown(object sender, MouseButtonEventArgs e)
+    {
+        if (PositionInputTextBox.Visibility == Visibility.Visible && !PositionInputTextBox.IsMouseOver)
+        {
+            MoveToTarget(showValidationMessage: false);
+        }
     }
 
     private void Window_DragOver(object sender, DragEventArgs e)
@@ -278,7 +315,13 @@ public partial class MainWindow : Window
         try
         {
             var content = await TextFileReader.ReadAsync(filePath);
+            RecentFileEntry? previousEntry = _recentFiles.FirstOrDefault(entry =>
+                string.Equals(entry.FilePath, content.FilePath, StringComparison.OrdinalIgnoreCase));
             _currentText = content.Text;
+            _currentFilePath = content.FilePath;
+            _currentReadProgress = previousEntry?.ReadProgress ?? 0;
+            _pages.Clear();
+            _currentPageIndex = 0;
             BuildLineStarts();
             _searchIndex = -1;
             _lastSearchQuery = string.Empty;
@@ -296,7 +339,7 @@ public partial class MainWindow : Window
             UpdateCurrentPosition();
 
             var entry = new RecentFileEntry(content.FilePath, content.EncodingName,
-                content.ByteLength, DateTimeOffset.Now);
+                content.ByteLength, DateTimeOffset.Now, _currentReadProgress);
             try { SetRecentFiles(await HistoryStore.AddOrUpdateAsync(entry)); }
             catch (IOException) { }
             catch (UnauthorizedAccessException) { }
@@ -510,7 +553,6 @@ public partial class MainWindow : Window
             ContentTextBox.Visibility = Visibility.Collapsed;
             PageView.Visibility = Visibility.Visible;
             ModeDescriptionText.Text = "페이지로 보기";
-            MoveDescriptionText.Text = "이동할 페이지 번호";
             Dispatcher.BeginInvoke(StartPagination, DispatcherPriority.Loaded);
         }
         else
@@ -522,9 +564,10 @@ public partial class MainWindow : Window
             }
             ContentTextBox.Visibility = Visibility.Visible;
             ModeDescriptionText.Text = "스크롤로 보기";
-            MoveDescriptionText.Text = "이동할 줄 번호";
         }
-        MoveTargetTextBox.Clear();
+        PreviousPageButton.Visibility = IsPageMode ? Visibility.Visible : Visibility.Hidden;
+        NextPageButton.Visibility = IsPageMode ? Visibility.Visible : Visibility.Hidden;
+        EndPositionEditing();
         UpdateCurrentPosition();
     }
 
@@ -695,6 +738,7 @@ public partial class MainWindow : Window
         if (_pages.Count == 0) return;
         _currentPageIndex = Math.Clamp(index, 0, _pages.Count - 1);
         RenderCurrentPage();
+        RecordReadingProgress(100d * (_currentPageIndex + 1) / _pages.Count);
     }
 
     private void RenderCurrentPage()
@@ -721,7 +765,6 @@ public partial class MainWindow : Window
             PageTextBlock.Text = page.Text;
         }
 
-        PageIndicatorText.Text = $"{_currentPageIndex + 1:N0} / {_pages.Count:N0}";
         UpdateCurrentPosition();
     }
 
@@ -775,6 +818,7 @@ public partial class MainWindow : Window
         {
             _currentPageIndex = FindPageContaining(_searchIndex);
             RenderCurrentPage();
+            RecordReadingProgress(100d * (_currentPageIndex + 1) / Math.Max(1, _pages.Count));
         }
         else
         {
@@ -785,44 +829,90 @@ public partial class MainWindow : Window
         }
     }
 
-    private void MoveToTarget_Click(object sender, RoutedEventArgs e) => MoveToTarget();
-
-    private void MoveTargetTextBox_KeyDown(object sender, KeyEventArgs e)
+    private void CurrentPositionButton_Click(object sender, RoutedEventArgs e)
     {
-        if (e.Key != Key.Enter) return;
-        MoveToTarget();
-        e.Handled = true;
+        PositionInputTextBox.Text = Math.Max(1, _currentPositionValue).ToString();
+        CurrentPositionButton.Visibility = Visibility.Collapsed;
+        PositionInputTextBox.Visibility = Visibility.Visible;
+        PositionInputTextBox.Focus();
+        PositionInputTextBox.SelectAll();
     }
 
-    private void MoveToTarget()
+    private void PositionInputTextBox_KeyDown(object sender, KeyEventArgs e)
     {
-        if (!int.TryParse(MoveTargetTextBox.Text, out int target) || target < 1)
+        if (e.Key == Key.Enter)
         {
-            MessageBox.Show(this, "1 이상의 숫자를 입력하세요.", "이동", MessageBoxButton.OK, MessageBoxImage.Information);
+            MoveToTarget(showValidationMessage: true);
+            e.Handled = true;
+        }
+        else if (e.Key == Key.Escape)
+        {
+            EndPositionEditing();
+            e.Handled = true;
+        }
+    }
+
+    private void PositionInputTextBox_LostKeyboardFocus(object sender, KeyboardFocusChangedEventArgs e)
+    {
+        if (!_isCommittingPosition && PositionInputTextBox.Visibility == Visibility.Visible)
+        {
+            MoveToTarget(showValidationMessage: false);
+        }
+    }
+
+    private void EndPositionEditing()
+    {
+        PositionInputTextBox.Visibility = Visibility.Collapsed;
+        CurrentPositionButton.Visibility = Visibility.Visible;
+    }
+
+    private void MoveToTarget(bool showValidationMessage)
+    {
+        if (_isCommittingPosition) return;
+
+        string unitName = IsPageMode ? "페이지" : "줄";
+        if (!int.TryParse(PositionInputTextBox.Text, out int target) || target < 1 || target > _totalPositionValue)
+        {
+            if (showValidationMessage)
+            {
+                _isCommittingPosition = true;
+                MessageBox.Show(this, $"{unitName} 번호는 1부터 {_totalPositionValue:N0}까지 입력할 수 있습니다.",
+                    "이동", MessageBoxButton.OK, MessageBoxImage.Information);
+                _isCommittingPosition = false;
+                Dispatcher.BeginInvoke(() =>
+                {
+                    PositionInputTextBox.Focus();
+                    PositionInputTextBox.SelectAll();
+                }, DispatcherPriority.Input);
+            }
+            else
+            {
+                EndPositionEditing();
+            }
             return;
         }
 
-        if (IsPageMode)
+        _isCommittingPosition = true;
+        EndPositionEditing();
+        try
         {
-            if (target > _pages.Count)
+            if (IsPageMode)
             {
-                MessageBox.Show(this, $"페이지는 1부터 {_pages.Count:N0}까지 있습니다.", "이동", MessageBoxButton.OK, MessageBoxImage.Information);
-                return;
+                ShowPage(target - 1);
             }
-            ShowPage(target - 1);
+            else
+            {
+                int characterIndex = FindLogicalLineStart(target);
+                if (characterIndex < 0) return;
+                ContentTextBox.Focus();
+                ContentTextBox.Select(characterIndex, 0);
+                int visualLine = ContentTextBox.GetLineIndexFromCharacterIndex(characterIndex);
+                ContentTextBox.ScrollToLine(Math.Max(0, visualLine - 2));
+            }
         }
-        else
+        finally
         {
-            int characterIndex = FindLogicalLineStart(target);
-            if (characterIndex < 0)
-            {
-                MessageBox.Show(this, $"줄은 1부터 {_lineStarts.Count:N0}까지 있습니다.", "이동", MessageBoxButton.OK, MessageBoxImage.Information);
-                return;
-            }
-            ContentTextBox.Focus();
-            ContentTextBox.Select(characterIndex, 0);
-            int visualLine = ContentTextBox.GetLineIndexFromCharacterIndex(characterIndex);
-            ContentTextBox.ScrollToLine(Math.Max(0, visualLine - 2));
+            _isCommittingPosition = false;
         }
     }
 
@@ -846,22 +936,26 @@ public partial class MainWindow : Window
 
     private void ContentTextBox_ScrollChanged(object sender, ScrollChangedEventArgs e)
     {
-        if (!IsPageMode && e.VerticalChange != 0) UpdateCurrentPosition();
+        if (!IsPageMode && e.VerticalChange != 0)
+        {
+            UpdateCurrentPosition();
+            double scrollableHeight = Math.Max(0, e.ExtentHeight - e.ViewportHeight);
+            double progress = scrollableHeight <= 0 ? 100 : 100d * e.VerticalOffset / scrollableHeight;
+            RecordReadingProgress(progress);
+        }
     }
 
     private void UpdateCurrentPosition()
     {
         if (IsPageMode)
         {
-            CurrentPositionText.Text = _pages.Count == 0
-                ? "0 / 0"
-                : $"{_currentPageIndex + 1:N0} / {_pages.Count:N0}";
+            SetPositionDisplay(_pages.Count == 0 ? 0 : _currentPageIndex + 1, _pages.Count);
             return;
         }
 
         if (_lineStarts.Count == 0)
         {
-            CurrentPositionText.Text = "0 / 0";
+            SetPositionDisplay(0, 0);
             return;
         }
 
@@ -875,7 +969,32 @@ public partial class MainWindow : Window
 
         int lineIndex = _lineStarts.BinarySearch(characterIndex);
         if (lineIndex < 0) lineIndex = ~lineIndex - 1;
-        CurrentPositionText.Text = $"{Math.Max(0, lineIndex) + 1:N0} / {_lineStarts.Count:N0}";
+        SetPositionDisplay(Math.Max(0, lineIndex) + 1, _lineStarts.Count);
+    }
+
+    private void SetPositionDisplay(int current, int total)
+    {
+        _currentPositionValue = current;
+        _totalPositionValue = total;
+        CurrentPositionButton.Content = current.ToString("N0");
+        TotalPositionText.Text = total.ToString("N0");
+    }
+
+    private void RecordReadingProgress(double progress)
+    {
+        if (string.IsNullOrWhiteSpace(_currentFilePath)) return;
+        progress = Math.Clamp(progress, 0, 100);
+        if (Math.Abs(progress - _currentReadProgress) < 0.05) return;
+        _currentReadProgress = progress;
+
+        int index = _recentFiles.ToList().FindIndex(entry =>
+            string.Equals(entry.FilePath, _currentFilePath, StringComparison.OrdinalIgnoreCase));
+        if (index >= 0) _recentFiles[index] = _recentFiles[index] with { ReadProgress = progress };
+
+        _pendingProgressFilePath = _currentFilePath;
+        _pendingProgressValue = progress;
+        _readingProgressSaveTimer.Stop();
+        _readingProgressSaveTimer.Start();
     }
 
     private int FindPageContaining(int characterIndex)
@@ -958,6 +1077,8 @@ public partial class MainWindow : Window
         SetThemeBrush("ItemHoverBrush", dark ? "#1C2532" : "#F2F4F7");
         SetThemeBrush("ItemSelectedBrush", dark ? "#1D3454" : "#EAF2FF");
         SetThemeBrush("ItemSelectedBorderBrush", dark ? "#3B82F6" : "#93B4F5");
+        SetThemeBrush("ScrollThumbBrush", dark ? "#4B5565" : "#AAB4C3");
+        SetThemeBrush("ScrollThumbHoverBrush", dark ? "#718096" : "#667085");
     }
 
     private static void SetThemeBrush(string resourceKey, string colorValue)
@@ -1036,6 +1157,17 @@ public partial class MainWindow : Window
     private void MainWindow_Closing(object? sender, System.ComponentModel.CancelEventArgs e)
     {
         _paginationCancellation?.Cancel();
+        _readingProgressSaveTimer.Stop();
+        if (!string.IsNullOrWhiteSpace(_pendingProgressFilePath))
+        {
+            try
+            {
+                Task.Run(() => HistoryStore.UpdateProgressAsync(_pendingProgressFilePath, _pendingProgressValue))
+                    .GetAwaiter().GetResult();
+            }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+        }
         CaptureWindowSize();
         try { ViewerSettingsStore.Save(_viewerSettings); }
         catch (IOException) { }

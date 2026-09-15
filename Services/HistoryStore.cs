@@ -59,6 +59,17 @@ public static class HistoryStore
         return entries;
     }
 
+    public static async Task<IReadOnlyList<RecentFileEntry>>UpdateProgressAsync(string filePath, double progress)
+    {
+        List<RecentFileEntry> entries = (await LoadAsync()).ToList();
+        int index = entries.FindIndex(item => string.Equals(item.FilePath, filePath, StringComparison.OrdinalIgnoreCase));
+        if (index < 0) return entries;
+
+        entries[index] = entries[index] with { ReadProgress = Math.Clamp(progress, 0, 100) };
+        await SaveAsync(entries);
+        return entries;
+    }
+
     public static Task ClearAsync() => SaveAsync([]);
 
     private static async Task SaveAsync(IReadOnlyList<RecentFileEntry> entries)
