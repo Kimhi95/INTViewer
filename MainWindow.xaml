@@ -42,6 +42,7 @@
 
                     <Grid Grid.Row="1">
                         <ListBox x:Name="RecentFilesList" Margin="12,0" BorderThickness="0" Background="Transparent"
+                                 Foreground="{DynamicResource PrimaryTextBrush}"
                                  SelectionChanged="RecentFilesList_SelectionChanged">
                             <ListBox.ItemContainerStyle>
                                 <Style TargetType="ListBoxItem">
@@ -79,7 +80,8 @@
                                             <ColumnDefinition Width="Auto" />
                                         </Grid.ColumnDefinitions>
                                         <StackPanel>
-                                            <TextBlock Text="{Binding FileName}" FontSize="14" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                                            <TextBlock Text="{Binding FileName}" Foreground="{DynamicResource PrimaryTextBrush}"
+                                                       FontSize="14" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
                                             <TextBlock Margin="0,4,0,0" Text="{Binding Location}" Foreground="{DynamicResource MutedTextBrush}" FontSize="12" TextTrimming="CharacterEllipsis" />
                                         </StackPanel>
                                         <StackPanel Grid.Column="1" Margin="20,0,0,0">
@@ -183,13 +185,18 @@
                     Margin="0,64,20,20" Padding="20" Background="#FAFFFFFF" BorderBrush="#D0D5DD" BorderThickness="1"
                     TextElement.Foreground="#101828" CornerRadius="10" Visibility="Collapsed" Panel.ZIndex="30">
                 <Border.Effect><DropShadowEffect BlurRadius="24" ShadowDepth="6" Opacity="0.22" /></Border.Effect>
-                <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
-                    <StackPanel>
-                        <Grid Margin="0,0,0,18">
-                            <TextBlock Text="환경설정" FontSize="19" FontWeight="Bold" VerticalAlignment="Center" />
-                            <Button Content="×" HorizontalAlignment="Right" Width="32" Height="32" Padding="0" FontSize="20"
-                                    Background="Transparent" Foreground="#344054" Click="CloseSettings_Click" />
-                        </Grid>
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+                    <Grid Margin="0,0,0,14">
+                        <TextBlock Text="환경설정" FontSize="19" FontWeight="Bold" VerticalAlignment="Center" />
+                        <Button Content="×" HorizontalAlignment="Right" Width="32" Height="32" Padding="0" FontSize="20"
+                                Background="Transparent" Foreground="#344054" Click="CloseSettings_Click" />
+                    </Grid>
+                    <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                        <StackPanel Margin="0,0,8,0">
 
                         <TextBlock Text="색상" FontWeight="SemiBold" />
                         <Grid Margin="0,10,0,10">
@@ -273,7 +280,7 @@
                         </Grid>
 
                         <Separator Margin="0,16,0,18" />
-                        <TextBlock Text="폰트" FontWeight="SemiBold" />
+                        <TextBlock Text="font 폴더 글꼴" FontWeight="SemiBold" />
                         <ComboBox x:Name="FontFamilyComboBox" Margin="0,10,0,16" Padding="8,6"
                                   SelectionChanged="FontFamilyComboBox_SelectionChanged" />
 
@@ -282,8 +289,9 @@
                             <ToggleButton x:Name="BoldToggle" Margin="0,0,8,0" Content="굵게" Checked="FontStyleToggle_Changed" Unchecked="FontStyleToggle_Changed" />
                             <ToggleButton x:Name="ItalicToggle" Content="기울임" Checked="FontStyleToggle_Changed" Unchecked="FontStyleToggle_Changed" />
                         </StackPanel>
-                    </StackPanel>
-                </ScrollViewer>
+                        </StackPanel>
+                    </ScrollViewer>
+                </Grid>
             </Border>
 
             <Border x:Name="SearchPanel" Width="330" HorizontalAlignment="Right" VerticalAlignment="Top"

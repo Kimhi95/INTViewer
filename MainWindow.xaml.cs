@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.Globalization;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -37,6 +38,7 @@ public partial class MainWindow : Window
     private readonly ObservableCollection<RecentFileEntry> _recentFiles = [];
     private readonly List<PageSlice> _pages = [];
     private readonly List<int> _lineStarts = [];
+    private readonly Dictionary<string, MediaFontFamily> _readerFonts = new(StringComparer.CurrentCultureIgnoreCase);
     private readonly DispatcherTimer _repaginationTimer;
     private readonly DispatcherTimer _windowSizeSaveTimer;
     private ViewerSettings _viewerSettings = ViewerSettings.Default;
@@ -56,11 +58,7 @@ public partial class MainWindow : Window
         ViewerView.Children.Remove(SettingsPanel);
         RootGrid.Children.Add(SettingsPanel);
         RecentFilesList.ItemsSource = _recentFiles;
-        FontFamilyComboBox.ItemsSource = Fonts.SystemFontFamilies
-            .Select(font => font.Source)
-            .Distinct(StringComparer.CurrentCultureIgnoreCase)
-            .OrderBy(name => name, StringComparer.CurrentCultureIgnoreCase)
-            .ToList();
+        LoadReaderFonts();
         ContentTextBox.AddHandler(ScrollViewer.ScrollChangedEvent, new ScrollChangedEventHandler(ContentTextBox_ScrollChanged));
         Loaded += MainWindow_Loaded;
         SourceInitialized += (_, _) => ApplyTitleBarTheme(BrushFromHex(_viewerSettings.BackgroundColor, Colors.White).Color);
@@ -113,6 +111,10 @@ public partial class MainWindow : Window
                 Italic = false,
                 SettingsVersion = 3
             };
+        }
+        if (_readerFonts.Count > 0 && !_readerFonts.ContainsKey(_viewerSettings.FontFamily))
+        {
+            _viewerSettings = _viewerSettings with { FontFamily = _readerFonts.Keys.First() };
         }
         RestoreWindowSize();
         ApplyViewerSettings();
@@ -402,6 +404,53 @@ public partial class MainWindow : Window
         _viewerSettings = _viewerSettings with { FontFamily = fontFamily };
         ApplyReaderLayout();
         QueueReaderLayoutUpdate();
+    }
+
+    private void LoadReaderFonts()
+    {
+        string fontRoot = Path.Combine(AppContext.BaseDirectory, "font");
+        if (Directory.Exists(fontRoot))
+        {
+            foreach (string fontPath in Directory.EnumerateFiles(fontRoot, "*.*", SearchOption.AllDirectories)
+                         .Where(path => string.Equals(Path.GetExtension(path), ".ttf", StringComparison.OrdinalIgnoreCase)
+                                     || string.Equals(Path.GetExtension(path), ".otf", StringComparison.OrdinalIgnoreCase)))
+            {
+                try
+                {
+                    var glyphTypeface = new GlyphTypeface(new Uri(fontPath, UriKind.Absolute));
+                    string? familyName = GetLocalizedFontName(glyphTypeface.FamilyNames)
+                                         ?? GetLocalizedFontName(glyphTypeface.Win32FamilyNames);
+                    if (string.IsNullOrWhiteSpace(familyName) || _readerFonts.ContainsKey(familyName)) continue;
+
+                    string directory = Path.GetDirectoryName(fontPath)! + Path.DirectorySeparatorChar;
+                    _readerFonts[familyName] = new MediaFontFamily(
+                        new Uri(directory, UriKind.Absolute), $"./#{familyName}");
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException
+                                           or FileFormatException or NotSupportedException)
+                {
+                    // 손상되었거나 지원하지 않는 폰트 파일은 목록에서 제외합니다.
+                }
+            }
+        }
+
+        List<string> fontNames = _readerFonts.Keys
+            .OrderBy(name => name, StringComparer.CurrentCultureIgnoreCase)
+            .ToList();
+        FontFamilyComboBox.ItemsSource = fontNames;
+        FontFamilyComboBox.IsEnabled = fontNames.Count > 0;
+        FontFamilyComboBox.ToolTip = fontNames.Count > 0
+            ? $"실행 파일 옆 font 폴더에서 {fontNames.Count}개 글꼴을 찾았습니다."
+            : "실행 파일 옆 font 폴더에 .ttf 또는 .otf 파일을 넣어 주세요.";
+    }
+
+    private static string? GetLocalizedFontName(IDictionary<CultureInfo, string> names)
+    {
+        CultureInfo korean = CultureInfo.GetCultureInfo("ko-KR");
+        CultureInfo english = CultureInfo.GetCultureInfo("en-US");
+        if (names.TryGetValue(korean, out string? koreanName)) return koreanName;
+        if (names.TryGetValue(english, out string? englishName)) return englishName;
+        return names.Values.FirstOrDefault();
     }
 
     private void FontStyleToggle_Changed(object sender, RoutedEventArgs e)
@@ -846,10 +895,9 @@ public partial class MainWindow : Window
         PageContentArea.Margin = new Thickness(left, top, right, bottom);
         ContentTextBox.FontSize = fontSize;
         PageTextBlock.FontSize = fontSize;
-        string fontFamilyName = string.IsNullOrWhiteSpace(_viewerSettings.FontFamily)
-            ? ViewerSettings.Default.FontFamily
-            : _viewerSettings.FontFamily;
-        var readerFont = new MediaFontFamily(fontFamilyName);
+        MediaFontFamily readerFont = _readerFonts.TryGetValue(_viewerSettings.FontFamily, out MediaFontFamily? bundledFont)
+            ? bundledFont
+            : new MediaFontFamily(ViewerSettings.Default.FontFamily);
         ContentTextBox.FontFamily = readerFont;
         PageTextBlock.FontFamily = readerFont;
         ContentTextBox.FontWeight = _viewerSettings.Bold ? FontWeights.Bold : FontWeights.Normal;
