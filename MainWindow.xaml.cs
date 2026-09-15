@@ -14,7 +14,6 @@ using System.Windows.Threading;
 using INTViewer.Models;
 using INTViewer.Services;
 using Microsoft.Win32;
-using DrawingColor = System.Drawing.Color;
 using DataFormats = System.Windows.DataFormats;
 using DragEventArgs = System.Windows.DragEventArgs;
 using DragDropEffects = System.Windows.DragDropEffects;
@@ -27,7 +26,6 @@ using MediaFontFamily = System.Windows.Media.FontFamily;
 using MessageBox = System.Windows.MessageBox;
 using OpenFileDialog = Microsoft.Win32.OpenFileDialog;
 using Size = System.Windows.Size;
-using WinForms = System.Windows.Forms;
 
 namespace INTViewer;
 
@@ -47,6 +45,8 @@ public partial class MainWindow : Window
     private int _searchIndex = -1;
     private int _currentPageIndex;
     private bool _isInitializing = true;
+    private bool _isUpdatingColorPicker;
+    private bool _isEditingBackgroundColor;
     private CancellationTokenSource? _paginationCancellation;
 
     [DllImport("dwmapi.dll")]
@@ -61,6 +61,7 @@ public partial class MainWindow : Window
         LoadReaderFonts();
         ContentTextBox.AddHandler(ScrollViewer.ScrollChangedEvent, new ScrollChangedEventHandler(ContentTextBox_ScrollChanged));
         Loaded += MainWindow_Loaded;
+        Deactivated += (_, _) => ColorPickerPopup.IsOpen = false;
         SourceInitialized += (_, _) => ApplyTitleBarTheme(BrushFromHex(_viewerSettings.BackgroundColor, Colors.White).Color);
 
         _repaginationTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(300) };
@@ -343,35 +344,65 @@ public partial class MainWindow : Window
         await SaveViewerSettingsAsync();
     }
 
-    private async void ChooseBackgroundColor_Click(object sender, RoutedEventArgs e)
+    private void ChooseBackgroundColor_Click(object sender, RoutedEventArgs e)
     {
-        string? selected = ChooseColor(_viewerSettings.BackgroundColor);
-        if (selected is null) return;
-        _viewerSettings = _viewerSettings with { BackgroundColor = selected };
-        ApplyViewerSettings();
-        await SaveViewerSettingsAsync();
+        OpenColorPicker(sender as UIElement, true, _viewerSettings.BackgroundColor);
     }
 
-    private async void ChooseTextColor_Click(object sender, RoutedEventArgs e)
+    private void ChooseTextColor_Click(object sender, RoutedEventArgs e)
     {
-        string? selected = ChooseColor(_viewerSettings.TextColor);
-        if (selected is null) return;
-        _viewerSettings = _viewerSettings with { TextColor = selected };
-        ApplyViewerSettings();
-        await SaveViewerSettingsAsync();
+        OpenColorPicker(sender as UIElement, false, _viewerSettings.TextColor);
     }
 
-    private string? ChooseColor(string currentColor)
+    private void OpenColorPicker(UIElement? placementTarget, bool backgroundColor, string currentColor)
     {
-        SolidColorBrush currentBrush = BrushFromHex(currentColor, Colors.White);
-        using var dialog = new WinForms.ColorDialog
-        {
-            FullOpen = true,
-            Color = DrawingColor.FromArgb(currentBrush.Color.R, currentBrush.Color.G, currentBrush.Color.B)
-        };
-        return dialog.ShowDialog() == WinForms.DialogResult.OK
-            ? $"#{dialog.Color.R:X2}{dialog.Color.G:X2}{dialog.Color.B:X2}"
-            : null;
+        if (placementTarget is null) return;
+
+        _isEditingBackgroundColor = backgroundColor;
+        MediaColor color = BrushFromHex(currentColor, Colors.White).Color;
+        _isUpdatingColorPicker = true;
+        RedSlider.Value = color.R;
+        GreenSlider.Value = color.G;
+        BlueSlider.Value = color.B;
+        UpdateColorPickerPreview(color);
+        ColorPickerTitleText.Text = backgroundColor ? "배경색 선택" : "글자색 선택";
+        _isUpdatingColorPicker = false;
+        ColorPickerPopup.PlacementTarget = placementTarget;
+        ColorPickerPopup.IsOpen = true;
+    }
+
+    private void ColorSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+    {
+        if (_isUpdatingColorPicker || !ColorPickerPopup.IsOpen) return;
+
+        MediaColor color = MediaColor.FromRgb(
+            (byte)Math.Round(RedSlider.Value),
+            (byte)Math.Round(GreenSlider.Value),
+            (byte)Math.Round(BlueSlider.Value));
+        string colorValue = $"#{color.R:X2}{color.G:X2}{color.B:X2}";
+        _viewerSettings = _isEditingBackgroundColor
+            ? _viewerSettings with { BackgroundColor = colorValue }
+            : _viewerSettings with { TextColor = colorValue };
+        UpdateColorPickerPreview(color);
+        ApplyViewerSettings();
+        _windowSizeSaveTimer.Stop();
+        _windowSizeSaveTimer.Start();
+    }
+
+    private void UpdateColorPickerPreview(MediaColor color)
+    {
+        ColorPickerPreview.Background = new SolidColorBrush(color);
+        ColorHexText.Text = $"#{color.R:X2}{color.G:X2}{color.B:X2}";
+        RedValueText.Text = color.R.ToString();
+        GreenValueText.Text = color.G.ToString();
+        BlueValueText.Text = color.B.ToString();
+    }
+
+    private async void ColorPickerPopup_Closed(object sender, EventArgs e)
+    {
+        _windowSizeSaveTimer.Stop();
+        CaptureWindowSize();
+        await SaveViewerSettingsAsync();
     }
 
     private async void ViewMode_Changed(object sender, RoutedEventArgs e)

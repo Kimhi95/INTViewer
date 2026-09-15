@@ -328,5 +328,47 @@
                 </StackPanel>
             </Border>
         </Grid>
+
+        <Popup x:Name="ColorPickerPopup" AllowsTransparency="True" StaysOpen="False"
+               Placement="Bottom" PopupAnimation="Fade" Closed="ColorPickerPopup_Closed">
+            <Border Width="286" Margin="8" Padding="18" Background="#FFFDFDFE"
+                    BorderBrush="#D0D5DD" BorderThickness="1" CornerRadius="12"
+                    TextElement.Foreground="#101828">
+                <Border.Effect><DropShadowEffect BlurRadius="22" ShadowDepth="5" Opacity="0.24" /></Border.Effect>
+                <StackPanel>
+                    <Grid Margin="0,0,0,14">
+                        <TextBlock x:Name="ColorPickerTitleText" Text="색상 선택" FontSize="16" FontWeight="Bold" />
+                        <StackPanel HorizontalAlignment="Right" Orientation="Horizontal">
+                            <Border x:Name="ColorPickerPreview" Width="26" Height="26" Margin="0,0,10,0"
+                                    BorderBrush="#98A2B3" BorderThickness="1" CornerRadius="6" />
+                            <TextBlock x:Name="ColorHexText" VerticalAlignment="Center" FontFamily="Consolas" />
+                        </StackPanel>
+                    </Grid>
+                    <Grid Margin="0,0,0,8">
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="24" /><ColumnDefinition Width="*" /><ColumnDefinition Width="38" /></Grid.ColumnDefinitions>
+                        <TextBlock Text="R" VerticalAlignment="Center" FontWeight="SemiBold" />
+                        <Slider Grid.Column="1" x:Name="RedSlider" Minimum="0" Maximum="255" TickFrequency="1"
+                                IsSnapToTickEnabled="True" ValueChanged="ColorSlider_ValueChanged" />
+                        <TextBlock Grid.Column="2" x:Name="RedValueText" HorizontalAlignment="Right" VerticalAlignment="Center" />
+                    </Grid>
+                    <Grid Margin="0,0,0,8">
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="24" /><ColumnDefinition Width="*" /><ColumnDefinition Width="38" /></Grid.ColumnDefinitions>
+                        <TextBlock Text="G" VerticalAlignment="Center" FontWeight="SemiBold" />
+                        <Slider Grid.Column="1" x:Name="GreenSlider" Minimum="0" Maximum="255" TickFrequency="1"
+                                IsSnapToTickEnabled="True" ValueChanged="ColorSlider_ValueChanged" />
+                        <TextBlock Grid.Column="2" x:Name="GreenValueText" HorizontalAlignment="Right" VerticalAlignment="Center" />
+                    </Grid>
+                    <Grid>
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="24" /><ColumnDefinition Width="*" /><ColumnDefinition Width="38" /></Grid.ColumnDefinitions>
+                        <TextBlock Text="B" VerticalAlignment="Center" FontWeight="SemiBold" />
+                        <Slider Grid.Column="1" x:Name="BlueSlider" Minimum="0" Maximum="255" TickFrequency="1"
+                                IsSnapToTickEnabled="True" ValueChanged="ColorSlider_ValueChanged" />
+                        <TextBlock Grid.Column="2" x:Name="BlueValueText" HorizontalAlignment="Right" VerticalAlignment="Center" />
+                    </Grid>
+                    <TextBlock Margin="0,14,0,0" Text="패널 밖을 클릭하면 자동으로 닫힙니다."
+                               Foreground="#667085" FontSize="11" />
+                </StackPanel>
+            </Border>
+        </Popup>
     </Grid>
 </Window>
