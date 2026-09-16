@@ -51,10 +51,12 @@ public partial class MainWindow : Window
     private double _currentReadProgress;
     private string? _pendingProgressFilePath;
     private double _pendingProgressValue;
+    private double? _pendingRestoreProgress;
     private bool _isInitializing = true;
     private bool _isUpdatingColorPicker;
     private bool _isEditingBackgroundColor;
     private bool _isCommittingPosition;
+    private bool _isRestoringProgress;
     private CancellationTokenSource? _paginationCancellation;
 
     [DllImport("dwmapi.dll")]
@@ -147,7 +149,9 @@ public partial class MainWindow : Window
         if (args.Length > 1 && File.Exists(args[1])) await OpenFileAsync(args[1]);
     }
 
-    private async void OpenFile_Click(object sender, RoutedEventArgs e)
+    private async void OpenFile_Click(object sender, RoutedEventArgs e) => await OpenFileFromDialogAsync();
+
+    private async Task OpenFileFromDialogAsync()
     {
         var dialog = new OpenFileDialog
         {
@@ -216,6 +220,13 @@ public partial class MainWindow : Window
 
     private void Window_PreviewKeyDown(object sender, KeyEventArgs e)
     {
+        if (Keyboard.Modifiers == ModifierKeys.Control && e.Key == Key.O)
+        {
+            _ = OpenFileFromDialogAsync();
+            e.Handled = true;
+            return;
+        }
+
         if (e.Key == Key.Escape && PositionInputTextBox.Visibility == Visibility.Visible)
         {
             EndPositionEditing();
@@ -259,7 +270,17 @@ public partial class MainWindow : Window
         if (IsPageMode && SettingsPanel.Visibility != Visibility.Visible && SearchPanel.Visibility != Visibility.Visible
             && PositionInputTextBox.Visibility != Visibility.Visible)
         {
-            if (e.Key is Key.Right or Key.Down or Key.PageDown or Key.Space)
+            if (e.Key == Key.Home)
+            {
+                ShowPage(0);
+                e.Handled = true;
+            }
+            else if (e.Key == Key.End)
+            {
+                ShowPage(_pages.Count - 1);
+                e.Handled = true;
+            }
+            else if (e.Key is Key.Right or Key.Down or Key.PageDown or Key.Space)
             {
                 ShowPage(_currentPageIndex + 1);
                 e.Handled = true;
@@ -320,6 +341,7 @@ public partial class MainWindow : Window
             _currentText = content.Text;
             _currentFilePath = content.FilePath;
             _currentReadProgress = previousEntry?.ReadProgress ?? 0;
+            _pendingRestoreProgress = _currentReadProgress;
             _pages.Clear();
             _currentPageIndex = 0;
             BuildLineStarts();
@@ -331,6 +353,7 @@ public partial class MainWindow : Window
             }
             else
             {
+                _isRestoringProgress = _pendingRestoreProgress.HasValue;
                 ContentTextBox.Text = content.Text;
                 ContentTextBox.ScrollToHome();
             }
@@ -452,6 +475,8 @@ public partial class MainWindow : Window
     {
         if (_isInitializing) return;
         _viewerSettings = _viewerSettings with { PageMode = IsPageMode };
+        if (!string.IsNullOrWhiteSpace(_currentFilePath)) _pendingRestoreProgress = _currentReadProgress;
+        if (!IsPageMode && _pendingRestoreProgress.HasValue) _isRestoringProgress = true;
         UpdateViewMode();
         await SaveViewerSettingsAsync();
     }
@@ -564,6 +589,10 @@ public partial class MainWindow : Window
             }
             ContentTextBox.Visibility = Visibility.Visible;
             ModeDescriptionText.Text = "스크롤로 보기";
+            if (_pendingRestoreProgress.HasValue)
+            {
+                Dispatcher.BeginInvoke(RestoreScrollProgress, DispatcherPriority.ContextIdle);
+            }
         }
         PreviousPageButton.Visibility = IsPageMode ? Visibility.Visible : Visibility.Hidden;
         NextPageButton.Visibility = IsPageMode ? Visibility.Visible : Visibility.Hidden;
@@ -611,7 +640,17 @@ public partial class MainWindow : Window
             if (token.IsCancellationRequested || !IsPageMode) return;
             _pages.Clear();
             _pages.AddRange(calculatedPages);
-            _currentPageIndex = FindPageContaining(preservedCharacterIndex);
+            if (_pendingRestoreProgress is double restoreProgress)
+            {
+                _currentPageIndex = restoreProgress <= 0
+                    ? 0
+                    : Math.Clamp((int)Math.Ceiling(restoreProgress / 100d * _pages.Count) - 1, 0, _pages.Count - 1);
+                _pendingRestoreProgress = null;
+            }
+            else
+            {
+                _currentPageIndex = FindPageContaining(preservedCharacterIndex);
+            }
             RenderCurrentPage();
         }
         catch (OperationCanceledException)
@@ -939,10 +978,27 @@ public partial class MainWindow : Window
         if (!IsPageMode && e.VerticalChange != 0)
         {
             UpdateCurrentPosition();
+            if (_isRestoringProgress) return;
             double scrollableHeight = Math.Max(0, e.ExtentHeight - e.ViewportHeight);
             double progress = scrollableHeight <= 0 ? 100 : 100d * e.VerticalOffset / scrollableHeight;
             RecordReadingProgress(progress);
         }
+    }
+
+    private void RestoreScrollProgress()
+    {
+        if (IsPageMode || _pendingRestoreProgress is not double progress || string.IsNullOrEmpty(_currentText)) return;
+        _pendingRestoreProgress = null;
+        _isRestoringProgress = true;
+        ContentTextBox.UpdateLayout();
+        int lineCount = Math.Max(1, ContentTextBox.LineCount);
+        int targetVisualLine = Math.Clamp((int)Math.Round((lineCount - 1) * progress / 100d), 0, lineCount - 1);
+        ContentTextBox.ScrollToLine(targetVisualLine);
+        Dispatcher.BeginInvoke(() =>
+        {
+            _isRestoringProgress = false;
+            UpdateCurrentPosition();
+        }, DispatcherPriority.Background);
     }
 
     private void UpdateCurrentPosition()
