@@ -14,9 +14,13 @@ public sealed record ViewerSettings(
     string FontFamily = "Malgun Gothic",
     bool Bold = false,
     bool Italic = false,
-    int SettingsVersion = 3)
+    double LineSpacing = 1.35,
+    bool AutoOpenLastFile = false,
+    bool SearchCaseSensitive = false,
+    bool SearchWholeWord = false,
+    int SettingsVersion = 4)
 {
     public static ViewerSettings Default { get; } = new(
         "#FFFFFF", "#111827", false, 960, 680, 28, 12, 32, 32, 14,
-        "Malgun Gothic", false, false, 3);
+        "Malgun Gothic", false, false, 1.35, false, false, false, 4);
 }

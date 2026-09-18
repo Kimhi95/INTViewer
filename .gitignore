@@ -6,3 +6,5 @@ settings.json
 .build-appdata/
 .dotnet-home/
 .nuget/
+Tests/
+Snapshots/

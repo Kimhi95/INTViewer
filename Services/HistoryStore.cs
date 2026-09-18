@@ -40,7 +40,16 @@ public static class HistoryStore
         }
         catch (JsonException)
         {
-            return [];
+            string backupPath = HistoryFilePath + ".bak";
+            if (!File.Exists(backupPath)) return [];
+            try
+            {
+                File.Copy(HistoryFilePath, HistoryFilePath + ".corrupt", overwrite: true);
+                File.Copy(backupPath, HistoryFilePath, overwrite: true);
+                await using FileStream backupStream = File.OpenRead(backupPath);
+                return await JsonSerializer.DeserializeAsync<List<RecentFileEntry>>(backupStream, JsonOptions).ConfigureAwait(false) ?? [];
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException) { return []; }
         }
     }
 
@@ -78,6 +87,10 @@ public static class HistoryStore
     }
 
     public static async Task<IReadOnlyList<RecentFileEntry>>UpdateProgressAsync(string filePath, double progress)
+        => await UpdateReadingStateAsync(filePath, progress, null, null).ConfigureAwait(false);
+
+    public static async Task<IReadOnlyList<RecentFileEntry>> UpdateReadingStateAsync(
+        string filePath, double progress, int? readPosition, int[]? bookmarks)
     {
         await FileGate.WaitAsync().ConfigureAwait(false);
         try
@@ -86,7 +99,28 @@ public static class HistoryStore
             int index = entries.FindIndex(item => string.Equals(item.FilePath, filePath, StringComparison.OrdinalIgnoreCase));
             if (index < 0) return entries;
 
-            entries[index] = entries[index] with { ReadProgress = Math.Clamp(progress, 0, 100) };
+            RecentFileEntry current = entries[index];
+            entries[index] = current with
+            {
+                ReadProgress = Math.Clamp(progress, 0, 100),
+                ReadPosition = readPosition.HasValue ? Math.Max(0, readPosition.Value) : current.ReadPosition,
+                BookmarkPositions = bookmarks ?? current.BookmarkPositions
+            };
+            await SaveCoreAsync(entries).ConfigureAwait(false);
+            return entries;
+        }
+        finally { FileGate.Release(); }
+    }
+
+    public static async Task<IReadOnlyList<RecentFileEntry>> SetPinnedAsync(string filePath, bool isPinned)
+    {
+        await FileGate.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            List<RecentFileEntry> entries = await LoadCoreAsync().ConfigureAwait(false);
+            int index = entries.FindIndex(item => string.Equals(item.FilePath, filePath, StringComparison.OrdinalIgnoreCase));
+            if (index >= 0) entries[index] = entries[index] with { IsPinned = isPinned };
+            entries = entries.OrderByDescending(item => item.IsPinned).ThenByDescending(item => item.LastOpenedAt).ToList();
             await SaveCoreAsync(entries).ConfigureAwait(false);
             return entries;
         }
@@ -103,6 +137,7 @@ public static class HistoryStore
     private static async Task SaveCoreAsync(IReadOnlyList<RecentFileEntry> entries)
     {
         string temporaryPath = HistoryFilePath + ".tmp";
+        if (File.Exists(HistoryFilePath)) File.Copy(HistoryFilePath, HistoryFilePath + ".bak", overwrite: true);
 
         await using (FileStream stream = File.Create(temporaryPath))
         {
