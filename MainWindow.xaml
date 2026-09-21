@@ -209,14 +209,14 @@
         <Grid x:Name="ViewerView" Visibility="Collapsed" SizeChanged="ViewerView_SizeChanged">
             <Border x:Name="ViewerBackground" Background="White" />
 
-            <TextBox x:Name="ContentTextBox" Margin="0,0,0,44" Padding="32,28" MaxWidth="1080" HorizontalAlignment="Center"
+            <TextBox x:Name="ContentTextBox" Margin="0" Padding="32,28" MaxWidth="1080" HorizontalAlignment="Center"
                      IsReadOnly="True" AcceptsReturn="True" AcceptsTab="True"
                      TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
                      BorderThickness="0" Background="Transparent" FontFamily="Consolas, Malgun Gothic" FontSize="14"
                      SelectionBrush="#FACC15" SelectionOpacity="0.65" IsInactiveSelectionHighlightEnabled="True" SpellCheck.IsEnabled="False"
                      SelectionChanged="ContentTextBox_SelectionChanged" AutomationProperties.Name="텍스트 내용" />
 
-            <Grid x:Name="PageView" Margin="0,0,0,44" MaxWidth="1080" HorizontalAlignment="Center" Visibility="Collapsed">
+            <Grid x:Name="PageView" Margin="0" MaxWidth="1080" HorizontalAlignment="Center" Visibility="Collapsed">
                 <Border x:Name="PageContentArea" Margin="32,28,32,28">
                     <TextBlock x:Name="PageTextBlock" TextWrapping="Wrap" FontFamily="Consolas, Malgun Gothic" FontSize="14"
                                Focusable="True" AutomationProperties.Name="페이지 내용" />
@@ -230,7 +230,7 @@
             <Border x:Name="PositionNavigationBar" Height="44" Width="176" VerticalAlignment="Bottom" HorizontalAlignment="Center" Background="Transparent" Panel.ZIndex="10">
                 <Border.Style>
                     <Style TargetType="Border">
-                        <Setter Property="Opacity" Value="0.78" />
+                        <Setter Property="Opacity" Value="0" />
                         <Style.Triggers>
                             <Trigger Property="IsMouseOver" Value="True"><Setter Property="Opacity" Value="1" /></Trigger>
                             <DataTrigger Binding="{Binding IsKeyboardFocusWithin, RelativeSource={RelativeSource Self}}" Value="True"><Setter Property="Opacity" Value="1" /></DataTrigger>
@@ -320,6 +320,10 @@
                             <ToggleButton x:Name="WhiteModeToggle" Grid.Column="0" Content="화이트 모드" Click="WhiteMode_Click" Background="#F2F4F7" Foreground="#111827" />
                             <ToggleButton x:Name="DarkModeToggle" Grid.Column="2" Content="다크 모드" Click="DarkMode_Click" Background="#111827" Foreground="#F9FAFB" />
                         </Grid>
+                        <Border Margin="0,0,0,12" Padding="10,7" Background="{DynamicResource ItemHoverBrush}" CornerRadius="8">
+                            <TextBlock x:Name="ThemeModeStatusText" Text="현재 테마 · 화이트 모드" HorizontalAlignment="Center"
+                                       Foreground="{DynamicResource MutedTextBrush}" FontSize="12" FontWeight="SemiBold" />
+                        </Border>
                         <Grid Margin="0,10,0,8">
                             <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
                             <StackPanel Orientation="Horizontal" VerticalAlignment="Center">

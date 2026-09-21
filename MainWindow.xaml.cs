@@ -37,6 +37,8 @@ namespace INTViewer;
 public partial class MainWindow : Window
 {
     private const int MaximumSearchMatches = 100_000;
+    private const string DarkBackgroundColor = "#050505";
+    private const string DarkTextColor = "#EDEDED";
     private sealed record PageSlice(int Start, int Length);
     private sealed record BookmarkListItem(int Position, string PositionLabel, string Preview);
 
@@ -214,6 +216,16 @@ public partial class MainWindow : Window
         if (_viewerSettings.SettingsVersion < 4)
         {
             _viewerSettings = _viewerSettings with { LineSpacing = 1.35, SettingsVersion = 4 };
+        }
+        if (string.Equals(_viewerSettings.BackgroundColor, "#111827", StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(_viewerSettings.TextColor, "#E5E7EB", StringComparison.OrdinalIgnoreCase))
+        {
+            _viewerSettings = _viewerSettings with
+            {
+                BackgroundColor = DarkBackgroundColor,
+                TextColor = DarkTextColor,
+                SettingsVersion = ViewerSettings.Default.SettingsVersion
+            };
         }
         if (_readerFonts.Count > 0 && !_readerFonts.ContainsKey(_viewerSettings.FontFamily))
         {
@@ -669,7 +681,7 @@ public partial class MainWindow : Window
 
     private void DarkMode_Click(object sender, RoutedEventArgs e)
     {
-        _viewerSettings = _viewerSettings with { BackgroundColor = "#111827", TextColor = "#E5E7EB" };
+        _viewerSettings = _viewerSettings with { BackgroundColor = DarkBackgroundColor, TextColor = DarkTextColor };
         ApplyViewerSettings();
         QueueViewerSettingsSave();
     }
@@ -1512,12 +1524,15 @@ public partial class MainWindow : Window
     {
         bool white = string.Equals(_viewerSettings.BackgroundColor, "#FFFFFF", StringComparison.OrdinalIgnoreCase) &&
                      string.Equals(_viewerSettings.TextColor, "#111827", StringComparison.OrdinalIgnoreCase);
-        bool dark = string.Equals(_viewerSettings.BackgroundColor, "#111827", StringComparison.OrdinalIgnoreCase) &&
-                    string.Equals(_viewerSettings.TextColor, "#E5E7EB", StringComparison.OrdinalIgnoreCase);
+        bool dark = string.Equals(_viewerSettings.BackgroundColor, DarkBackgroundColor, StringComparison.OrdinalIgnoreCase) &&
+                    string.Equals(_viewerSettings.TextColor, DarkTextColor, StringComparison.OrdinalIgnoreCase);
         WhiteModeToggle.IsChecked = white;
         DarkModeToggle.IsChecked = dark;
         WhiteModeToggle.Content = white ? "✓ 화이트 모드" : "화이트 모드";
         DarkModeToggle.Content = dark ? "✓ 다크 모드" : "다크 모드";
+        ThemeModeStatusText.Text = white
+            ? "현재 테마 · 화이트 모드"
+            : dark ? "현재 테마 · 다크 모드" : "현재 테마 · 사용자 지정";
     }
 
     private void ApplyReaderLayout()
@@ -1558,31 +1573,31 @@ public partial class MainWindow : Window
     private void ApplyLibraryTheme(MediaColor viewerBackground)
     {
         bool dark = (0.2126 * viewerBackground.R + 0.7152 * viewerBackground.G + 0.0722 * viewerBackground.B) / 255 < 0.5;
-        SetThemeBrush("WindowBackgroundBrush", dark ? "#0B0F14" : "#F5F7FB");
-        SetThemeBrush("PanelBrush", dark ? "#151B24" : "#FFFFFF");
-        SetThemeBrush("PrimaryTextBrush", dark ? "#F4F7FB" : "#101828");
-        SetThemeBrush("MutedTextBrush", dark ? "#98A2B3" : "#667085");
-        SetThemeBrush("BorderBrush", dark ? "#293241" : "#E4E7EC");
-        SetThemeBrush("SecondaryButtonBrush", dark ? "#222B38" : "#E5E7EB");
-        SetThemeBrush("SecondaryButtonTextBrush", dark ? "#E5E7EB" : "#344054");
-        SetThemeBrush("ItemHoverBrush", dark ? "#1C2532" : "#F2F4F7");
+        SetThemeBrush("WindowBackgroundBrush", dark ? "#020202" : "#F5F7FB");
+        SetThemeBrush("PanelBrush", dark ? "#0B0B0D" : "#FFFFFF");
+        SetThemeBrush("PrimaryTextBrush", dark ? "#F5F5F5" : "#101828");
+        SetThemeBrush("MutedTextBrush", dark ? "#A1A1AA" : "#667085");
+        SetThemeBrush("BorderBrush", dark ? "#27272A" : "#E4E7EC");
+        SetThemeBrush("SecondaryButtonBrush", dark ? "#18181B" : "#E5E7EB");
+        SetThemeBrush("SecondaryButtonTextBrush", dark ? "#EDEDED" : "#344054");
+        SetThemeBrush("ItemHoverBrush", dark ? "#161619" : "#F2F4F7");
         SetThemeBrush("ItemSelectedBrush", dark ? "#1D3454" : "#EAF2FF");
         SetThemeBrush("ItemSelectedBorderBrush", dark ? "#3B82F6" : "#93B4F5");
-        SetThemeBrush("ScrollThumbBrush", dark ? "#4B5565" : "#AAB4C3");
-        SetThemeBrush("ScrollThumbHoverBrush", dark ? "#718096" : "#667085");
-        SetThemeBrush("InputBackgroundBrush", dark ? "#0F141C" : "#FFFFFF");
-        SetThemeBrush("InputTextBrush", dark ? "#F4F7FB" : "#101828");
-        SetThemeBrush("InputBorderBrush", dark ? "#344054" : "#CBD5E1");
-        SetThemeBrush("InputHoverBrush", dark ? "#667085" : "#94A3B8");
-        SetThemeBrush("InputTrackBrush", dark ? "#344054" : "#E2E8F0");
-        SetThemeBrush("InputPlaceholderBrush", dark ? "#7F8B9D" : "#98A2B3");
-        SetThemeBrush("ToggleBackgroundBrush", dark ? "#222B38" : "#F1F5F9");
-        SetThemeBrush("ToggleTextBrush", dark ? "#E5E7EB" : "#344054");
+        SetThemeBrush("ScrollThumbBrush", dark ? "#3F3F46" : "#AAB4C3");
+        SetThemeBrush("ScrollThumbHoverBrush", dark ? "#71717A" : "#667085");
+        SetThemeBrush("InputBackgroundBrush", dark ? "#09090B" : "#FFFFFF");
+        SetThemeBrush("InputTextBrush", dark ? "#F5F5F5" : "#101828");
+        SetThemeBrush("InputBorderBrush", dark ? "#3F3F46" : "#CBD5E1");
+        SetThemeBrush("InputHoverBrush", dark ? "#71717A" : "#94A3B8");
+        SetThemeBrush("InputTrackBrush", dark ? "#27272A" : "#E2E8F0");
+        SetThemeBrush("InputPlaceholderBrush", dark ? "#71717A" : "#98A2B3");
+        SetThemeBrush("ToggleBackgroundBrush", dark ? "#18181B" : "#F1F5F9");
+        SetThemeBrush("ToggleTextBrush", dark ? "#EDEDED" : "#344054");
         SetThemeBrush("ToggleCheckedBackgroundBrush", dark ? "#312E81" : "#EEF2FF");
         SetThemeBrush("ToggleCheckedTextBrush", dark ? "#E0E7FF" : "#4338CA");
-        SetThemeBrush("RecentItemBrush", dark ? "#111821" : "#F8FAFC");
-        SetThemeBrush("RecentItemBorderBrush", dark ? "#222C39" : "#EEF2F6");
-        SetThemeBrush("ProgressBadgeBrush", dark ? "#252A57" : "#EEF2FF");
+        SetThemeBrush("RecentItemBrush", dark ? "#08080A" : "#F8FAFC");
+        SetThemeBrush("RecentItemBorderBrush", dark ? "#202024" : "#EEF2F6");
+        SetThemeBrush("ProgressBadgeBrush", dark ? "#1E1B4B" : "#EEF2FF");
         SetThemeBrush("ProgressBadgeTextBrush", dark ? "#C7D2FE" : "#4338CA");
     }
 
