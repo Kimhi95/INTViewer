@@ -34,6 +34,15 @@ public partial class ModernDialog : Window
         }
 
         CancelButton.Visibility = buttons == MessageBoxButton.OK ? Visibility.Collapsed : Visibility.Visible;
+        bool confirmationOnly = buttons == MessageBoxButton.OK;
+        ConfirmButton.IsDefault = confirmationOnly;
+        CancelButton.IsDefault = !confirmationOnly;
+        Loaded += (_, _) =>
+        {
+            var defaultButton = confirmationOnly ? ConfirmButton : CancelButton;
+            defaultButton.Focus();
+            Keyboard.Focus(defaultButton);
+        };
         ConfigureIcon(image);
     }
 

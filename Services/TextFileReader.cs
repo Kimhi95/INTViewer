@@ -6,6 +6,7 @@ namespace INTViewer.Services;
 
 public static class TextFileReader
 {
+    private const long MaximumSupportedFileBytes = 128L * 1024 * 1024;
     private static readonly UTF8Encoding StrictUtf8 = new(
         encoderShouldEmitUTF8Identifier: false,
         throwOnInvalidBytes: true);
@@ -22,7 +23,8 @@ public static class TextFileReader
         new("utf-32-be", "UTF-32 BE"), new("cp949", "CP949")
     ];
 
-    public static async Task<TextFileContent>ReadAsync(string filePath, string encodingKey = "auto")
+    public static async Task<TextFileContent>ReadAsync(string filePath, string encodingKey = "auto",
+        CancellationToken cancellationToken = default)
     {
         filePath = Path.GetFullPath(filePath);
 
@@ -31,11 +33,17 @@ public static class TextFileReader
             throw new NotSupportedException("현재는 .txt 파일만 열 수 있습니다.");
         }
 
-        byte[] bytes = await File.ReadAllBytesAsync(filePath);
+        long fileLength = new FileInfo(filePath).Length;
+        if (fileLength > MaximumSupportedFileBytes)
+            throw new NotSupportedException("128MB보다 큰 텍스트 파일은 현재 버전에서 열 수 없습니다.");
+
+        byte[] bytes = await File.ReadAllBytesAsync(filePath, cancellationToken);
+        cancellationToken.ThrowIfCancellationRequested();
         (Encoding encoding, int preambleLength, string displayName, string detectedKey) = encodingKey == "auto"
             ? DetectEncoding(bytes)
             : GetRequestedEncoding(encodingKey, bytes);
         string text = encoding.GetString(bytes, preambleLength, bytes.Length - preambleLength);
+        cancellationToken.ThrowIfCancellationRequested();
 
         return new TextFileContent(filePath, text, displayName, detectedKey, bytes.LongLength, File.GetLastWriteTimeUtc(filePath));
     }
@@ -79,7 +87,7 @@ public static class TextFileReader
 
         try
         {
-            _ = StrictUtf8.GetString(bytes);
+            _ = StrictUtf8.GetCharCount(bytes);
             return (StrictUtf8, 0, "UTF-8", "utf-8");
         }
         catch (DecoderFallbackException)

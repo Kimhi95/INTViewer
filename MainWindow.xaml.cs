@@ -36,6 +36,7 @@ namespace INTViewer;
 
 public partial class MainWindow : Window
 {
+    private const int MaximumSearchMatches = 100_000;
     private sealed record PageSlice(int Start, int Length);
     private sealed record BookmarkListItem(int Position, string PositionLabel, string Preview);
 
@@ -81,10 +82,13 @@ public partial class MainWindow : Window
     private bool _isRestoringProgress;
     private bool _isFullScreen;
     private bool _storageWarningShown;
+    private bool _searchMatchesTruncated;
     private WindowStyle _savedWindowStyle;
     private WindowState _savedWindowState;
     private CancellationTokenSource? _paginationCancellation;
+    private CancellationTokenSource? _fileOpenCancellation;
     private int _paginationGeneration;
+    private int _fileOpenGeneration;
 
     [DllImport("dwmapi.dll")]
     private static extern int DwmSetWindowAttribute(IntPtr windowHandle, int attribute, ref int value, int valueSize);
@@ -127,7 +131,11 @@ public partial class MainWindow : Window
             string? filePath = _pendingProgressFilePath;
             double progress = _pendingProgressValue;
             if (string.IsNullOrWhiteSpace(filePath)) return;
-            try { await HistoryStore.UpdateReadingStateAsync(filePath, progress, _pendingReadPosition, _pendingBookmarks); }
+            try
+            {
+                await HistoryStore.UpdateReadingStateAsync(filePath, progress, _pendingReadPosition, _pendingBookmarks);
+                _storageWarningShown = false;
+            }
             catch (IOException ex) { ShowStorageWarningOnce(ex); }
             catch (UnauthorizedAccessException ex) { ShowStorageWarningOnce(ex); }
         };
@@ -152,11 +160,31 @@ public partial class MainWindow : Window
     }
 
     private bool IsPageMode => PageModeToggle.IsChecked == true;
+    private bool IsReaderOverlayOpen => SettingsPanel.Visibility == Visibility.Visible ||
+                                        SearchPanel.Visibility == Visibility.Visible ||
+                                        BookmarksPanel.Visibility == Visibility.Visible ||
+                                        PositionInputTextBox.Visibility == Visibility.Visible;
 
     private async void MainWindow_Loaded(object sender, RoutedEventArgs e)
     {
-        SetRecentFiles(await HistoryStore.LoadAsync());
-        _viewerSettings = await ViewerSettingsStore.LoadAsync();
+        try
+        {
+            SetRecentFiles(await HistoryStore.LoadAsync());
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            SetRecentFiles([]);
+            ShowStorageWarningOnce(ex);
+        }
+        try
+        {
+            _viewerSettings = await ViewerSettingsStore.LoadAsync();
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            _viewerSettings = ViewerSettings.Default;
+            ShowStorageWarningOnce(ex);
+        }
         if (_viewerSettings.FontSize <= 0)
         {
             _viewerSettings = _viewerSettings with
@@ -295,13 +323,14 @@ public partial class MainWindow : Window
             e.Handled = true;
             return;
         }
-        if (Keyboard.Modifiers == ModifierKeys.Control && e.Key == Key.B && ViewerView.Visibility == Visibility.Visible)
+        if (Keyboard.Modifiers == ModifierKeys.Control && e.Key == Key.B &&
+            ViewerView.Visibility == Visibility.Visible && !IsReaderOverlayOpen)
         {
             ToggleBookmark();
             e.Handled = true;
             return;
         }
-        if (e.Key == Key.F2 && ViewerView.Visibility == Visibility.Visible)
+        if (e.Key == Key.F2 && ViewerView.Visibility == Visibility.Visible && !IsReaderOverlayOpen)
         {
             GoToNextBookmark();
             e.Handled = true;
@@ -331,6 +360,14 @@ public partial class MainWindow : Window
             return;
         }
 
+        if (LibraryView.Visibility == Visibility.Visible && e.Key == Key.Enter &&
+            RecentFilesList.IsKeyboardFocusWithin && RecentFilesList.SelectedItem is RecentFileEntry)
+        {
+            _ = OpenSelectedFileAsync();
+            e.Handled = true;
+            return;
+        }
+
         if (e.Key == Key.Escape && PositionInputTextBox.Visibility == Visibility.Visible)
         {
             EndPositionEditing();
@@ -340,19 +377,26 @@ public partial class MainWindow : Window
 
         if (e.Key == Key.Escape && SettingsPanel.Visibility == Visibility.Visible)
         {
-            SettingsPanel.Visibility = Visibility.Collapsed;
+            CloseSettingsPanel();
             e.Handled = true;
             return;
         }
 
         if (e.Key == Key.Escape && BookmarksPanel.Visibility == Visibility.Visible)
         {
-            BookmarksPanel.Visibility = Visibility.Collapsed;
+            CloseBookmarksPanel();
             e.Handled = true;
             return;
         }
 
         if (ViewerView.Visibility != Visibility.Visible) return;
+
+        if (Keyboard.Modifiers == ModifierKeys.Control && e.Key == Key.G && !IsReaderOverlayOpen)
+        {
+            CurrentPositionButton_Click(CurrentPositionButton, new RoutedEventArgs());
+            e.Handled = true;
+            return;
+        }
 
         if (Keyboard.Modifiers == ModifierKeys.Control && e.Key == Key.F)
         {
@@ -368,7 +412,7 @@ public partial class MainWindow : Window
         {
             if (SearchPanel.Visibility == Visibility.Visible)
             {
-                SearchPanel.Visibility = Visibility.Collapsed;
+                CloseSearchPanel();
             }
             else
             {
@@ -378,9 +422,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        if (IsPageMode && SettingsPanel.Visibility != Visibility.Visible && SearchPanel.Visibility != Visibility.Visible
-            && BookmarksPanel.Visibility != Visibility.Visible
-            && PositionInputTextBox.Visibility != Visibility.Visible)
+        if (IsPageMode && !IsReaderOverlayOpen)
         {
             if (e.Key == Key.Home)
             {
@@ -446,9 +488,17 @@ public partial class MainWindow : Window
 
     private async Task OpenFileAsync(string filePath, string encodingKey = "auto")
     {
+        int generation = ++_fileOpenGeneration;
+        await FlushCurrentReadingStateAsync();
+        if (generation != _fileOpenGeneration) return;
+        _fileOpenCancellation?.Cancel();
+        var openCancellation = new CancellationTokenSource();
+        _fileOpenCancellation = openCancellation;
+        Mouse.OverrideCursor = System.Windows.Input.Cursors.Wait;
         try
         {
-            var content = await TextFileReader.ReadAsync(filePath, encodingKey);
+            var content = await TextFileReader.ReadAsync(filePath, encodingKey, openCancellation.Token);
+            openCancellation.Token.ThrowIfCancellationRequested();
             RecentFileEntry? previousEntry = _recentFiles.FirstOrDefault(entry =>
                 string.Equals(entry.FilePath, content.FilePath, StringComparison.OrdinalIgnoreCase));
             bool resetChangedFilePosition = false;
@@ -462,11 +512,16 @@ public partial class MainWindow : Window
             _currentText = content.Text;
             _currentFilePath = content.FilePath;
             _currentReadProgress = resetChangedFilePosition ? 0 : previousEntry?.ReadProgress ?? 0;
+            _pendingScrollProgress = _currentReadProgress;
             _pendingRestorePosition = !resetChangedFilePosition && previousEntry is { ReadPosition: > 0 } ? previousEntry.ReadPosition : null;
             _pendingRestoreProgress = _currentReadProgress;
             _bookmarks.Clear();
             if (!resetChangedFilePosition && previousEntry?.BookmarkPositions is { } savedBookmarks)
                 _bookmarks.AddRange(savedBookmarks.Where(position => position >= 0 && position < content.Text.Length));
+            _pendingReadPosition = resetChangedFilePosition ? 0 : previousEntry?.ReadPosition ?? 0;
+            _pendingProgressFilePath = content.FilePath;
+            _pendingProgressValue = _currentReadProgress;
+            _pendingBookmarks = _bookmarks.ToArray();
             _currentEncodingKey = content.EncodingKey;
             _currentLastWriteTimeUtc = content.LastWriteTimeUtc;
             _ignoredWriteTimeUtc = default;
@@ -476,6 +531,10 @@ public partial class MainWindow : Window
             BuildLineStarts();
             _searchIndex = -1;
             _lastSearchQuery = string.Empty;
+            _searchMatches.Clear();
+            _searchMatchesTruncated = false;
+            _searchMatchListIndex = -1;
+            SearchResultText.Text = string.Empty;
             if (IsPageMode)
             {
                 ContentTextBox.Clear();
@@ -494,13 +553,30 @@ public partial class MainWindow : Window
                 content.ByteLength, DateTimeOffset.Now, _currentReadProgress,
                 resetChangedFilePosition ? 0 : previousEntry?.ReadPosition ?? 0, content.LastWriteTimeUtc, previousEntry?.IsPinned ?? false,
                 _bookmarks.ToArray());
-            try { SetRecentFiles(await HistoryStore.AddOrUpdateAsync(entry)); }
+            try
+            {
+                IReadOnlyList<RecentFileEntry> entries = await HistoryStore.AddOrUpdateAsync(entry);
+                openCancellation.Token.ThrowIfCancellationRequested();
+                if (generation == _fileOpenGeneration) SetRecentFiles(entries);
+            }
             catch (IOException ex) { ShowStorageWarningOnce(ex); }
             catch (UnauthorizedAccessException ex) { ShowStorageWarningOnce(ex); }
+        }
+        catch (OperationCanceledException) when (openCancellation.IsCancellationRequested)
+        {
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or DecoderFallbackException or NotSupportedException)
         {
             ModernDialog.Show(this, ex.Message, "파일 열기 오류", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+        finally
+        {
+            if (ReferenceEquals(_fileOpenCancellation, openCancellation))
+            {
+                _fileOpenCancellation = null;
+                Mouse.OverrideCursor = null;
+            }
+            openCancellation.Dispose();
         }
     }
 
@@ -508,12 +584,17 @@ public partial class MainWindow : Window
     {
         SearchPanel.Visibility = Visibility.Collapsed;
         BookmarksPanel.Visibility = Visibility.Collapsed;
-        SettingsPanel.Visibility = SettingsPanel.Visibility == Visibility.Visible
-            ? Visibility.Collapsed
-            : Visibility.Visible;
+        if (SettingsPanel.Visibility == Visibility.Visible)
+        {
+            CloseSettingsPanel();
+            return;
+        }
+        SettingsPanel.Visibility = Visibility.Visible;
+        SettingsScrollViewer.ScrollToHome();
+        Dispatcher.BeginInvoke(() => SettingsCloseButton.Focus(), DispatcherPriority.Input);
     }
 
-    private void CloseSettings_Click(object sender, RoutedEventArgs e) => SettingsPanel.Visibility = Visibility.Collapsed;
+    private void CloseSettings_Click(object sender, RoutedEventArgs e) => CloseSettingsPanel();
 
     private void BackToLibrary_Click(object sender, RoutedEventArgs e) => ShowLibrary();
 
@@ -521,24 +602,63 @@ public partial class MainWindow : Window
     {
         SettingsPanel.Visibility = Visibility.Collapsed;
         BookmarksPanel.Visibility = Visibility.Collapsed;
-        SearchPanel.Visibility = SearchPanel.Visibility == Visibility.Visible
-            ? Visibility.Collapsed
-            : Visibility.Visible;
-        if (SearchPanel.Visibility == Visibility.Visible) SearchTextBox.Focus();
+        if (SearchPanel.Visibility == Visibility.Visible)
+        {
+            CloseSearchPanel();
+            return;
+        }
+        SearchPanel.Visibility = Visibility.Visible;
+        SearchTextBox.Focus();
+        SearchTextBox.SelectAll();
     }
 
-    private void CloseSearch_Click(object sender, RoutedEventArgs e) => SearchPanel.Visibility = Visibility.Collapsed;
+    private void CloseSearch_Click(object sender, RoutedEventArgs e) => CloseSearchPanel();
 
     private void BookmarksButton_Click(object sender, RoutedEventArgs e)
     {
         SettingsPanel.Visibility = Visibility.Collapsed;
         SearchPanel.Visibility = Visibility.Collapsed;
         bool open = BookmarksPanel.Visibility != Visibility.Visible;
-        BookmarksPanel.Visibility = open ? Visibility.Visible : Visibility.Collapsed;
-        if (open) RefreshBookmarkList();
+        if (!open)
+        {
+            CloseBookmarksPanel();
+            return;
+        }
+        BookmarksPanel.Visibility = Visibility.Visible;
+        RefreshBookmarkList();
+        Dispatcher.BeginInvoke(() =>
+        {
+            if (_bookmarkItems.Count > 0) BookmarkListBox.Focus();
+            else BookmarksCloseButton.Focus();
+        }, DispatcherPriority.Input);
     }
 
-    private void CloseBookmarks_Click(object sender, RoutedEventArgs e) => BookmarksPanel.Visibility = Visibility.Collapsed;
+    private void CloseBookmarks_Click(object sender, RoutedEventArgs e) => CloseBookmarksPanel();
+
+    private void CloseSettingsPanel()
+    {
+        SettingsPanel.Visibility = Visibility.Collapsed;
+        FocusPrimarySurface();
+    }
+
+    private void CloseSearchPanel()
+    {
+        SearchPanel.Visibility = Visibility.Collapsed;
+        FocusPrimarySurface();
+    }
+
+    private void CloseBookmarksPanel()
+    {
+        BookmarksPanel.Visibility = Visibility.Collapsed;
+        FocusPrimarySurface();
+    }
+
+    private void FocusPrimarySurface()
+    {
+        if (LibraryView.Visibility == Visibility.Visible) OpenFileButton.Focus();
+        else if (IsPageMode) PageTextBlock.Focus();
+        else ContentTextBox.Focus();
+    }
 
     private void WhiteMode_Click(object sender, RoutedEventArgs e)
     {
@@ -959,28 +1079,31 @@ public partial class MainWindow : Window
                 () => TextPaginator.Paginate(text, availableWidth, availableHeight, typeface, fontSize, lineHeight, token),
                 token);
 
-            if (token.IsCancellationRequested || generation != _paginationGeneration || !IsPageMode) return;
-            _pages.Clear();
-            _pages.AddRange(calculatedPages.Select(page => new PageSlice(page.Start, page.Length)));
-            if (_pendingRestorePosition is int restorePosition)
+            await Dispatcher.InvokeAsync(() =>
             {
-                _currentPageIndex = FindPageContaining(Math.Clamp(restorePosition, 0, Math.Max(0, _currentText.Length - 1)));
-                _pendingRestorePosition = null;
-                _pendingRestoreProgress = null;
-            }
-            else if (_pendingRestoreProgress is double restoreProgress)
-            {
-                _currentPageIndex = restoreProgress <= 0
-                    ? 0
-                    : Math.Clamp((int)Math.Ceiling(restoreProgress / 100d * _pages.Count) - 1, 0, _pages.Count - 1);
-                _pendingRestoreProgress = null;
-            }
-            else
-            {
-                _currentPageIndex = FindPageContaining(preservedCharacterIndex);
-            }
-            RenderCurrentPage();
-            if (BookmarksPanel.Visibility == Visibility.Visible) RefreshBookmarkList();
+                if (token.IsCancellationRequested || generation != _paginationGeneration || !IsPageMode) return;
+                _pages.Clear();
+                _pages.AddRange(calculatedPages.Select(page => new PageSlice(page.Start, page.Length)));
+                if (_pendingRestorePosition is int restorePosition)
+                {
+                    _currentPageIndex = FindPageContaining(Math.Clamp(restorePosition, 0, Math.Max(0, _currentText.Length - 1)));
+                    _pendingRestorePosition = null;
+                    _pendingRestoreProgress = null;
+                }
+                else if (_pendingRestoreProgress is double restoreProgress)
+                {
+                    _currentPageIndex = restoreProgress <= 0
+                        ? 0
+                        : Math.Clamp((int)Math.Ceiling(restoreProgress / 100d * _pages.Count) - 1, 0, _pages.Count - 1);
+                    _pendingRestoreProgress = null;
+                }
+                else
+                {
+                    _currentPageIndex = FindPageContaining(preservedCharacterIndex);
+                }
+                RenderCurrentPage();
+                if (BookmarksPanel.Visibility == Visibility.Visible) RefreshBookmarkList();
+            }, DispatcherPriority.Render, token);
         }
         catch (OperationCanceledException)
         {
@@ -1056,7 +1179,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        if (!string.Equals(query, _lastSearchQuery, StringComparison.CurrentCulture) || _searchMatches.Count == 0)
+        if (!string.Equals(query, _lastSearchQuery, StringComparison.CurrentCulture))
         {
             _lastSearchQuery = query;
             BuildSearchMatches(query);
@@ -1074,7 +1197,8 @@ public partial class MainWindow : Window
             : (_searchMatchListIndex - 1 + _searchMatches.Count) % _searchMatches.Count;
         _searchIndex = _searchMatches[_searchMatchListIndex];
 
-        SearchResultText.Text = $"{_searchMatchListIndex + 1:N0} / {_searchMatches.Count:N0} · 문자 위치 {_searchIndex + 1:N0}";
+        string totalLabel = $"{_searchMatches.Count:N0}{(_searchMatchesTruncated ? "+" : string.Empty)}";
+        SearchResultText.Text = $"{_searchMatchListIndex + 1:N0} / {totalLabel} · 문자 위치 {_searchIndex + 1:N0}";
         if (IsPageMode)
         {
             _currentPageIndex = FindPageContaining(_searchIndex);
@@ -1083,7 +1207,6 @@ public partial class MainWindow : Window
         }
         else
         {
-            ContentTextBox.Focus();
             ContentTextBox.Select(_searchIndex, query.Length);
             int visualLine = ContentTextBox.GetLineIndexFromCharacterIndex(_searchIndex);
             ContentTextBox.ScrollToLine(Math.Max(0, visualLine - 2));
@@ -1094,8 +1217,11 @@ public partial class MainWindow : Window
     {
         _searchMatches.Clear();
         _searchMatchListIndex = -1;
-        _searchMatches.AddRange(TextSearchService.FindAll(_currentText, query,
-            SearchCaseSensitiveCheckBox.IsChecked == true, SearchWholeWordCheckBox.IsChecked == true));
+        TextSearchResult result = TextSearchService.FindLimited(_currentText, query,
+            SearchCaseSensitiveCheckBox.IsChecked == true, SearchWholeWordCheckBox.IsChecked == true,
+            MaximumSearchMatches);
+        _searchMatches.AddRange(result.Matches);
+        _searchMatchesTruncated = result.IsTruncated;
     }
 
     private void CurrentPositionButton_Click(object sender, RoutedEventArgs e)
@@ -1258,7 +1384,7 @@ public partial class MainWindow : Window
 
         int characterIndex = ContentTextBox.SelectionStart;
         int firstVisibleLine = ContentTextBox.GetFirstVisibleLineIndex();
-        if (firstVisibleLine >= 0)
+        if (firstVisibleLine >= 0 && firstVisibleLine < ContentTextBox.LineCount)
         {
             int firstVisibleCharacter = ContentTextBox.GetCharacterIndexFromLineIndex(firstVisibleLine);
             if (firstVisibleCharacter >= 0) characterIndex = firstVisibleCharacter;
@@ -1282,7 +1408,9 @@ public partial class MainWindow : Window
     {
         if (IsPageMode && _pages.Count > 0) return _pages[Math.Clamp(_currentPageIndex, 0, _pages.Count - 1)].Start;
         int firstVisibleLine = ContentTextBox.GetFirstVisibleLineIndex();
-        int position = firstVisibleLine >= 0 ? ContentTextBox.GetCharacterIndexFromLineIndex(firstVisibleLine) : ContentTextBox.SelectionStart;
+        int position = firstVisibleLine >= 0 && firstVisibleLine < ContentTextBox.LineCount
+            ? ContentTextBox.GetCharacterIndexFromLineIndex(firstVisibleLine)
+            : ContentTextBox.SelectionStart;
         return Math.Clamp(position, 0, Math.Max(0, _currentText.Length - 1));
     }
 
@@ -1303,14 +1431,49 @@ public partial class MainWindow : Window
         _readingProgressSaveTimer.Start();
     }
 
+    private void CaptureCurrentReadingState()
+    {
+        if (string.IsNullOrWhiteSpace(_currentFilePath)) return;
+        double progress = IsPageMode && _pages.Count > 0
+            ? 100d * (_currentPageIndex + 1) / _pages.Count
+            : _pendingScrollProgress;
+        _currentReadProgress = double.IsFinite(progress) ? Math.Clamp(progress, 0, 100) : 0;
+        _pendingReadPosition = GetCurrentCharacterPosition();
+        _pendingProgressFilePath = _currentFilePath;
+        _pendingProgressValue = _currentReadProgress;
+        _pendingBookmarks = _bookmarks.ToArray();
+        RefreshCurrentRecentEntry();
+    }
+
+    private async Task FlushCurrentReadingStateAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_currentFilePath)) return;
+        _scrollUiTimer.Stop();
+        _readingProgressSaveTimer.Stop();
+        CaptureCurrentReadingState();
+        try
+        {
+            await HistoryStore.UpdateReadingStateAsync(
+                _pendingProgressFilePath!, _pendingProgressValue, _pendingReadPosition, _pendingBookmarks);
+            _storageWarningShown = false;
+        }
+        catch (IOException ex) { ShowStorageWarningOnce(ex); }
+        catch (UnauthorizedAccessException ex) { ShowStorageWarningOnce(ex); }
+    }
+
     private int FindPageContaining(int characterIndex)
     {
-        for (int index = 0; index < _pages.Count; index++)
+        int low = 0;
+        int high = _pages.Count - 1;
+        while (low <= high)
         {
-            PageSlice page = _pages[index];
-            if (characterIndex < page.Start + page.Length) return index;
+            int middle = low + (high - low) / 2;
+            PageSlice page = _pages[middle];
+            if (characterIndex < page.Start) high = middle - 1;
+            else if (characterIndex >= page.Start + page.Length) low = middle + 1;
+            else return middle;
         }
-        return Math.Max(0, _pages.Count - 1);
+        return Math.Clamp(low, 0, Math.Max(0, _pages.Count - 1));
     }
 
     private void ApplyViewerSettings()
@@ -1413,6 +1576,10 @@ public partial class MainWindow : Window
         SetThemeBrush("ToggleTextBrush", dark ? "#E5E7EB" : "#344054");
         SetThemeBrush("ToggleCheckedBackgroundBrush", dark ? "#312E81" : "#EEF2FF");
         SetThemeBrush("ToggleCheckedTextBrush", dark ? "#E0E7FF" : "#4338CA");
+        SetThemeBrush("RecentItemBrush", dark ? "#111821" : "#F8FAFC");
+        SetThemeBrush("RecentItemBorderBrush", dark ? "#222C39" : "#EEF2F6");
+        SetThemeBrush("ProgressBadgeBrush", dark ? "#252A57" : "#EEF2FF");
+        SetThemeBrush("ProgressBadgeTextBrush", dark ? "#C7D2FE" : "#4338CA");
     }
 
     private static void SetThemeBrush(string resourceKey, string colorValue)
@@ -1447,7 +1614,7 @@ public partial class MainWindow : Window
         {
             return new SolidColorBrush((MediaColor)MediaColorConverter.ConvertFromString(value));
         }
-        catch (FormatException)
+        catch (Exception ex) when (ex is FormatException or ArgumentException or NotSupportedException)
         {
             return new SolidColorBrush(fallback);
         }
@@ -1455,7 +1622,11 @@ public partial class MainWindow : Window
 
     private async Task SaveViewerSettingsAsync()
     {
-        try { await ViewerSettingsStore.SaveAsync(_viewerSettings); }
+        try
+        {
+            await ViewerSettingsStore.SaveAsync(_viewerSettings);
+            _storageWarningShown = false;
+        }
         catch (IOException ex) { ShowStorageWarningOnce(ex); }
         catch (UnauthorizedAccessException ex) { ShowStorageWarningOnce(ex); }
     }
@@ -1498,10 +1669,13 @@ public partial class MainWindow : Window
 
     private void MainWindow_Closing(object? sender, System.ComponentModel.CancelEventArgs e)
     {
+        _fileOpenGeneration++;
+        _fileOpenCancellation?.Cancel();
         _paginationCancellation?.Cancel();
         _repaginationTimer.Stop();
         _readerLayoutApplyTimer.Stop();
         _scrollUiTimer.Stop();
+        CaptureCurrentReadingState();
         _windowSizeSaveTimer.Stop();
         _readingProgressSaveTimer.Stop();
         if (!string.IsNullOrWhiteSpace(_pendingProgressFilePath))
@@ -1586,9 +1760,18 @@ public partial class MainWindow : Window
             return;
         }
 
-        if (e.Key != Key.Enter) return;
         ICollectionView view = CollectionViewSource.GetDefaultView(RecentFilesList.ItemsSource);
         RecentFileEntry? firstMatch = view.Cast<object>().OfType<RecentFileEntry>().FirstOrDefault();
+        if (e.Key == Key.Down && firstMatch is not null)
+        {
+            RecentFilesList.SelectedItem = firstMatch;
+            RecentFilesList.Focus();
+            if (RecentFilesList.ItemContainerGenerator.ContainerFromItem(firstMatch) is ListBoxItem item)
+                item.Focus();
+            e.Handled = true;
+            return;
+        }
+        if (e.Key != Key.Enter) return;
         if (firstMatch is null) return;
         RecentFilesList.SelectedItem = firstMatch;
         e.Handled = true;
@@ -1784,8 +1967,6 @@ public partial class MainWindow : Window
     private async void ReopenWithEncoding_Click(object sender, RoutedEventArgs e)
     {
         if (string.IsNullOrWhiteSpace(_currentFilePath) || EncodingComboBox.SelectedValue is not string key) return;
-        int position = GetCurrentCharacterPosition();
-        RecordReadingProgress(_currentReadProgress, position);
         await OpenFileAsync(_currentFilePath, key);
     }
 
@@ -1806,6 +1987,7 @@ public partial class MainWindow : Window
         };
         _lastSearchQuery = string.Empty;
         _searchMatches.Clear();
+        _searchMatchesTruncated = false;
         SearchResultText.Text = string.Empty;
         QueueViewerSettingsSave();
     }
@@ -1843,7 +2025,12 @@ public partial class MainWindow : Window
     private void ShowLibrary()
     {
         _scrollUiTimer.Stop();
-        RefreshCurrentRecentEntry();
+        CaptureCurrentReadingState();
+        if (!string.IsNullOrWhiteSpace(_pendingProgressFilePath))
+        {
+            _readingProgressSaveTimer.Stop();
+            _readingProgressSaveTimer.Start();
+        }
         SettingsPanel.Visibility = Visibility.Collapsed;
         SearchPanel.Visibility = Visibility.Collapsed;
         BookmarksPanel.Visibility = Visibility.Collapsed;
@@ -1851,21 +2038,36 @@ public partial class MainWindow : Window
         LibraryView.Visibility = Visibility.Visible;
         CollectionViewSource.GetDefaultView(RecentFilesList.ItemsSource)?.Refresh();
         Title = "INTViewer";
+        Dispatcher.BeginInvoke(() =>
+        {
+            if (RecentFilesList.SelectedItem is RecentFileEntry selected &&
+                RecentFilesList.ItemContainerGenerator.ContainerFromItem(selected) is ListBoxItem item)
+                item.Focus();
+            else
+                OpenFileButton.Focus();
+        }, DispatcherPriority.Input);
     }
 
     private void RefreshCurrentRecentEntry()
     {
         if (string.IsNullOrWhiteSpace(_currentFilePath)) return;
+        string? selectedPath = (RecentFilesList.SelectedItem as RecentFileEntry)?.FilePath;
         for (int index = 0; index < _recentFiles.Count; index++)
         {
             RecentFileEntry entry = _recentFiles[index];
             if (!string.Equals(entry.FilePath, _currentFilePath, StringComparison.OrdinalIgnoreCase)) continue;
-            _recentFiles[index] = entry with
+            RecentFileEntry updated = entry with
             {
                 ReadProgress = _currentReadProgress,
                 ReadPosition = _pendingReadPosition,
                 BookmarkPositions = _bookmarks.ToArray()
             };
+            _recentFiles[index] = updated;
+            if (string.Equals(selectedPath, updated.FilePath, StringComparison.OrdinalIgnoreCase))
+            {
+                RecentFilesList.SelectedItem = updated;
+                RecentFilesList.ScrollIntoView(updated);
+            }
             break;
         }
     }
@@ -1875,6 +2077,7 @@ public partial class MainWindow : Window
         LibraryView.Visibility = Visibility.Collapsed;
         UpdateViewMode();
         ViewerView.Visibility = Visibility.Visible;
+        Dispatcher.BeginInvoke(FocusPrimarySurface, DispatcherPriority.Input);
     }
 
     private void ShowHistoryError(Exception exception) => ModernDialog.Show(this, exception.Message,

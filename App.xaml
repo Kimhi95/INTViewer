@@ -26,6 +26,10 @@
         <SolidColorBrush x:Key="ToggleTextBrush" Color="#344054" />
         <SolidColorBrush x:Key="ToggleCheckedBackgroundBrush" Color="#EEF2FF" />
         <SolidColorBrush x:Key="ToggleCheckedTextBrush" Color="#4338CA" />
+        <SolidColorBrush x:Key="RecentItemBrush" Color="#F8FAFC" />
+        <SolidColorBrush x:Key="RecentItemBorderBrush" Color="#EEF2F6" />
+        <SolidColorBrush x:Key="ProgressBadgeBrush" Color="#EEF2FF" />
+        <SolidColorBrush x:Key="ProgressBadgeTextBrush" Color="#4338CA" />
 
         <ControlTemplate x:Key="VerticalScrollBarTemplate" TargetType="ScrollBar">
             <Grid Background="Transparent">
