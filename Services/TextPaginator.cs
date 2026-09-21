@@ -12,7 +12,11 @@ public static class TextPaginator
         if (text.Length == 0) return [new TextPage(0, 0)];
         typeface.TryGetGlyphTypeface(out GlyphTypeface? glyphTypeface);
         var widthCache = new double[char.MaxValue + 1];
-        int linesPerPage = Math.Max(1, (int)Math.Floor(height / Math.Max(1, lineHeight)));
+        // WPF can round the arranged text height up and its shaping/fallback can wrap one
+        // line earlier than the fast glyph-width estimate. Reserve one complete line plus
+        // a small device-pixel margin so the final line is never clipped by the page border.
+        double usableHeight = Math.Max(1, height - 2);
+        int linesPerPage = Math.Max(1, (int)Math.Floor(usableHeight / Math.Max(1, lineHeight)) - 1);
         var pages = new List<TextPage>();
         int pageStart = 0;
         int lineStart = 0;

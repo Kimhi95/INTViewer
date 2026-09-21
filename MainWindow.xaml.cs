@@ -1061,8 +1061,12 @@ public partial class MainWindow : Window
         double availableWidth = Math.Max(100, PageContentArea.ActualWidth);
         double availableHeight = Math.Max(100, PageContentArea.ActualHeight);
         double fontSize = PageTextBlock.FontSize;
-        double lineHeight = double.IsNaN(PageTextBlock.LineHeight) ? fontSize * 1.35 : PageTextBlock.LineHeight;
         var typeface = new Typeface(PageTextBlock.FontFamily, PageTextBlock.FontStyle, PageTextBlock.FontWeight, PageTextBlock.FontStretch);
+        double configuredLineHeight = double.IsNaN(PageTextBlock.LineHeight) ? fontSize * 1.35 : PageTextBlock.LineHeight;
+        double pixelsPerDip = VisualTreeHelper.GetDpi(PageTextBlock).PixelsPerDip;
+        var lineProbe = new FormattedText("가Ag", CultureInfo.CurrentUICulture, System.Windows.FlowDirection.LeftToRight,
+            typeface, fontSize, MediaBrushes.Black, pixelsPerDip);
+        double lineHeight = Math.Max(configuredLineHeight, lineProbe.Height);
         string text = _currentText;
 
         _paginationCancellation?.Cancel();
