@@ -216,9 +216,11 @@
                      SelectionBrush="#FACC15" SelectionOpacity="0.65" IsInactiveSelectionHighlightEnabled="True" SpellCheck.IsEnabled="False"
                      SelectionChanged="ContentTextBox_SelectionChanged" AutomationProperties.Name="텍스트 내용" />
 
-            <Grid x:Name="PageView" Margin="0" MaxWidth="1080" HorizontalAlignment="Center" Visibility="Collapsed">
-                <Border x:Name="PageContentArea" Margin="32,28,32,28">
+            <Grid x:Name="PageView" Margin="0" Width="{Binding ActualWidth, ElementName=ViewerView}"
+                  MaxWidth="1080" HorizontalAlignment="Center" Visibility="Collapsed">
+                <Border x:Name="PageContentArea" Margin="32,28,32,28" HorizontalAlignment="Stretch">
                     <TextBlock x:Name="PageTextBlock" TextWrapping="Wrap" FontFamily="Consolas, Malgun Gothic" FontSize="14"
+                               HorizontalAlignment="Stretch" TextAlignment="Left"
                                Focusable="True" AutomationProperties.Name="페이지 내용" />
                 </Border>
                 <Border x:Name="PreviousPageArea" Width="140" HorizontalAlignment="Left" Background="Transparent" Cursor="Hand"
