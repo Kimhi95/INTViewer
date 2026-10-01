@@ -31,6 +31,8 @@ using MediaColorConverter = System.Windows.Media.ColorConverter;
 using MediaFontFamily = System.Windows.Media.FontFamily;
 using OpenFileDialog = Microsoft.Win32.OpenFileDialog;
 using Size = System.Windows.Size;
+using DrawingIcon = System.Drawing.Icon;
+using Forms = System.Windows.Forms;
 
 namespace INTViewer;
 
@@ -85,12 +87,16 @@ public partial class MainWindow : Window
     private bool _isFullScreen;
     private bool _storageWarningShown;
     private bool _searchMatchesTruncated;
+    private bool _isExplicitExit;
     private WindowStyle _savedWindowStyle;
     private WindowState _savedWindowState;
     private CancellationTokenSource? _paginationCancellation;
     private CancellationTokenSource? _fileOpenCancellation;
     private int _paginationGeneration;
     private int _fileOpenGeneration;
+    private Forms.NotifyIcon? _trayIcon;
+    private Forms.ContextMenuStrip? _trayMenu;
+    private DrawingIcon? _trayIconImage;
 
     [DllImport("dwmapi.dll")]
     private static extern int DwmSetWindowAttribute(IntPtr windowHandle, int attribute, ref int value, int valueSize);
@@ -159,6 +165,7 @@ public partial class MainWindow : Window
             QueueReaderLayoutUpdate();
         };
         Closing += MainWindow_Closing;
+        System.Windows.Application.Current.SessionEnding += (_, _) => _isExplicitExit = true;
     }
 
     private bool IsPageMode => PageModeToggle.IsChecked == true;
@@ -683,6 +690,22 @@ public partial class MainWindow : Window
     {
         _viewerSettings = _viewerSettings with { BackgroundColor = DarkBackgroundColor, TextColor = DarkTextColor };
         ApplyViewerSettings();
+        QueueViewerSettingsSave();
+    }
+
+    private void ExitCloseBehavior_Click(object sender, RoutedEventArgs e)
+    {
+        if (_isInitializing) return;
+        _viewerSettings = _viewerSettings with { CloseToTray = false };
+        UpdateCloseBehaviorSelection();
+        QueueViewerSettingsSave();
+    }
+
+    private void TrayCloseBehavior_Click(object sender, RoutedEventArgs e)
+    {
+        if (_isInitializing) return;
+        _viewerSettings = _viewerSettings with { CloseToTray = true };
+        UpdateCloseBehaviorSelection();
         QueueViewerSettingsSave();
     }
 
@@ -1503,6 +1526,7 @@ public partial class MainWindow : Window
         BackgroundColorPreview.Background = background;
         TextColorPreview.Background = foreground;
         UpdateThemeModeSelection();
+        UpdateCloseBehaviorSelection();
         ApplyLibraryTheme(background.Color);
         ApplyTitleBarTheme(background.Color);
         bool wasInitializing = _isInitializing;
@@ -1533,6 +1557,16 @@ public partial class MainWindow : Window
         ThemeModeStatusText.Text = white
             ? "현재 테마 · 화이트 모드"
             : dark ? "현재 테마 · 다크 모드" : "현재 테마 · 사용자 지정";
+    }
+
+    private void UpdateCloseBehaviorSelection()
+    {
+        bool toTray = _viewerSettings.CloseToTray;
+        ExitCloseBehaviorToggle.IsChecked = !toTray;
+        TrayCloseBehaviorToggle.IsChecked = toTray;
+        ExitCloseBehaviorToggle.Content = toTray ? "프로그램 종료" : "✓ 프로그램 종료";
+        TrayCloseBehaviorToggle.Content = toTray ? "✓ 트레이로 닫기" : "트레이로 닫기";
+        CloseBehaviorStatusText.Text = toTray ? "현재 동작 · 트레이로 닫기" : "현재 동작 · 프로그램 종료";
     }
 
     private void ApplyReaderLayout()
@@ -1688,12 +1722,26 @@ public partial class MainWindow : Window
 
     private void MainWindow_Closing(object? sender, System.ComponentModel.CancelEventArgs e)
     {
+        if (_viewerSettings.CloseToTray && !_isExplicitExit)
+        {
+            e.Cancel = true;
+            PersistCurrentState();
+            HideToTray();
+            return;
+        }
+
         _fileOpenGeneration++;
         _fileOpenCancellation?.Cancel();
         _paginationCancellation?.Cancel();
         _repaginationTimer.Stop();
         _readerLayoutApplyTimer.Stop();
         _scrollUiTimer.Stop();
+        PersistCurrentState();
+        DisposeTrayIcon();
+    }
+
+    private void PersistCurrentState()
+    {
         CaptureCurrentReadingState();
         _windowSizeSaveTimer.Stop();
         _readingProgressSaveTimer.Stop();
@@ -1712,6 +1760,67 @@ public partial class MainWindow : Window
         try { ViewerSettingsStore.Save(_viewerSettings); }
         catch (IOException) { }
         catch (UnauthorizedAccessException) { }
+    }
+
+    private void HideToTray()
+    {
+        EnsureTrayIcon();
+        if (_trayIcon is not null) _trayIcon.Visible = true;
+        Hide();
+    }
+
+    private void RestoreFromTray()
+    {
+        if (_trayIcon is not null) _trayIcon.Visible = false;
+        Show();
+        if (WindowState == WindowState.Minimized) WindowState = WindowState.Normal;
+        Activate();
+        Topmost = true;
+        Topmost = false;
+        FocusPrimarySurface();
+    }
+
+    private void EnsureTrayIcon()
+    {
+        if (_trayIcon is not null) return;
+
+        string? executablePath = Environment.ProcessPath;
+        _trayIconImage = !string.IsNullOrWhiteSpace(executablePath)
+            ? DrawingIcon.ExtractAssociatedIcon(executablePath)
+            : null;
+        _trayIconImage ??= (DrawingIcon)System.Drawing.SystemIcons.Application.Clone();
+
+        _trayMenu = new Forms.ContextMenuStrip();
+        Forms.ToolStripItem openItem = _trayMenu.Items.Add("INTViewer 열기");
+        openItem.Font = new System.Drawing.Font(openItem.Font, System.Drawing.FontStyle.Bold);
+        openItem.Click += (_, _) => Dispatcher.BeginInvoke(RestoreFromTray);
+        _trayMenu.Items.Add(new Forms.ToolStripSeparator());
+        Forms.ToolStripItem exitItem = _trayMenu.Items.Add("프로그램 종료");
+        exitItem.Click += (_, _) => Dispatcher.BeginInvoke(() =>
+        {
+            _isExplicitExit = true;
+            Close();
+        });
+
+        _trayIcon = new Forms.NotifyIcon
+        {
+            Icon = _trayIconImage,
+            Text = "INTViewer",
+            ContextMenuStrip = _trayMenu,
+            Visible = false
+        };
+        _trayIcon.DoubleClick += (_, _) => Dispatcher.BeginInvoke(RestoreFromTray);
+    }
+
+    private void DisposeTrayIcon()
+    {
+        if (_trayIcon is not null) _trayIcon.Visible = false;
+        _trayIcon?.Dispose();
+        _trayMenu?.Dispose();
+        _trayIconImage?.Dispose();
+        _trayIcon = null;
+        _trayMenu = null;
+        _trayIconImage = null;
     }
 
     private async Task RemoveHistoryEntryAsync(RecentFileEntry entry)

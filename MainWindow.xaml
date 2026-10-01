@@ -432,6 +432,22 @@
                         </Grid>
                         <CheckBox x:Name="AutoOpenLastFileCheckBox" Content="시작할 때 마지막 파일 자동 열기"
                                   Checked="AutoOpenLastFile_Changed" Unchecked="AutoOpenLastFile_Changed" />
+
+                        <Separator Margin="0,16,0,18" />
+                        <TextBlock Text="닫기 동작" FontWeight="SemiBold" />
+                        <TextBlock Margin="0,5,0,10" Text="창의 닫기 버튼을 눌렀을 때 수행할 동작입니다."
+                                   Foreground="{DynamicResource MutedTextBrush}" FontSize="12" TextWrapping="Wrap" />
+                        <Grid Margin="0,0,0,8">
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="8" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                            <ToggleButton x:Name="ExitCloseBehaviorToggle" Grid.Column="0" Content="프로그램 종료"
+                                          Click="ExitCloseBehavior_Click" AutomationProperties.Name="닫을 때 프로그램 종료" />
+                            <ToggleButton x:Name="TrayCloseBehaviorToggle" Grid.Column="2" Content="트레이로 닫기"
+                                          Click="TrayCloseBehavior_Click" AutomationProperties.Name="닫을 때 알림 영역으로 숨기기" />
+                        </Grid>
+                        <Border Margin="0,0,0,12" Padding="10,7" Background="{DynamicResource ItemHoverBrush}" CornerRadius="8">
+                            <TextBlock x:Name="CloseBehaviorStatusText" Text="현재 동작 · 프로그램 종료" HorizontalAlignment="Center"
+                                       Foreground="{DynamicResource MutedTextBrush}" FontSize="12" FontWeight="SemiBold" />
+                        </Border>
                         <Button Margin="0,14,0,4" Content="Windows TXT 연결 설정 열기" Click="OpenFileAssociationSettings_Click"
                                 Style="{StaticResource SecondaryButtonStyle}" />
                         </StackPanel>

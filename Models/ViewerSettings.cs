@@ -18,9 +18,10 @@ public sealed record ViewerSettings(
     bool AutoOpenLastFile = false,
     bool SearchCaseSensitive = false,
     bool SearchWholeWord = false,
-    int SettingsVersion = 5)
+    bool CloseToTray = false,
+    int SettingsVersion = 6)
 {
     public static ViewerSettings Default { get; } = new(
         "#FFFFFF", "#111827", false, 960, 680, 28, 12, 32, 32, 14,
-        "Malgun Gothic", false, false, 1.35, false, false, false, 5);
+        "Malgun Gothic", false, false, 1.35, false, false, false, false, 6);
 }
