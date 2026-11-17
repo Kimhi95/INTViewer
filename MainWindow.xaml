@@ -468,7 +468,8 @@
                     </Grid>
 
                     <Grid Margin="0,0,0,10">
-                        <TextBox x:Name="SearchTextBox" KeyDown="SearchTextBox_KeyDown" AutomationProperties.Name="검색할 문자" />
+                        <TextBox x:Name="SearchTextBox" KeyDown="SearchTextBox_KeyDown" TextChanged="SearchTextBox_TextChanged"
+                                 AutomationProperties.Name="검색할 문자" />
                         <TextBlock Margin="12,0" Text="검색할 문자 입력" Foreground="{DynamicResource InputPlaceholderBrush}"
                                    VerticalAlignment="Center" IsHitTestVisible="False">
                             <TextBlock.Style>
@@ -492,7 +493,16 @@
                         <Button Grid.Column="0" Content="이전" Click="FindPrevious_Click" Style="{StaticResource SecondaryButtonStyle}" />
                         <Button Grid.Column="2" Content="다음" Click="FindNext_Click" />
                     </Grid>
-                    <TextBlock x:Name="SearchResultText" Margin="0,4,0,0" Foreground="{DynamicResource MutedTextBrush}" FontSize="12" />
+                    <Border x:Name="SearchResultSummary" Margin="0,6,0,0" Padding="10,8"
+                            Background="{DynamicResource ItemHoverBrush}" CornerRadius="9" Visibility="Collapsed">
+                        <Grid>
+                            <TextBlock Text="검색 결과" Foreground="{DynamicResource MutedTextBrush}" FontSize="12" VerticalAlignment="Center" />
+                            <TextBlock x:Name="SearchResultCountText" Text="0/0" HorizontalAlignment="Right" VerticalAlignment="Center"
+                                       Foreground="{DynamicResource PrimaryTextBrush}" FontSize="13" FontWeight="Bold"
+                                       AutomationProperties.Name="현재 검색 결과와 전체 검색 결과" />
+                        </Grid>
+                    </Border>
+                    <TextBlock x:Name="SearchResultText" Margin="2,6,0,0" Foreground="{DynamicResource MutedTextBrush}" FontSize="12" />
                 </StackPanel>
             </Border>
 

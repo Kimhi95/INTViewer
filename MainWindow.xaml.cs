@@ -553,7 +553,7 @@ public partial class MainWindow : Window
             _searchMatches.Clear();
             _searchMatchesTruncated = false;
             _searchMatchListIndex = -1;
-            SearchResultText.Text = string.Empty;
+            ResetSearchResultUi(string.Empty);
             if (IsPageMode)
             {
                 ContentTextBox.Clear();
@@ -1209,12 +1209,24 @@ public partial class MainWindow : Window
         e.Handled = true;
     }
 
+    private void SearchTextBox_TextChanged(object sender, TextChangedEventArgs e)
+    {
+        if (string.Equals(SearchTextBox.Text, _lastSearchQuery, StringComparison.CurrentCulture)) return;
+        _searchIndex = -1;
+        _searchMatchListIndex = -1;
+        _searchMatches.Clear();
+        _searchMatchesTruncated = false;
+        ResetSearchResultUi(string.IsNullOrEmpty(SearchTextBox.Text)
+            ? "검색어를 입력하세요."
+            : "Enter 또는 다음 버튼으로 검색하세요.");
+    }
+
     private void FindText(bool forward)
     {
         string query = SearchTextBox.Text;
         if (string.IsNullOrEmpty(query) || _currentText.Length == 0)
         {
-            SearchResultText.Text = "검색어를 입력하세요.";
+            ResetSearchResultUi("검색어를 입력하세요.");
             return;
         }
 
@@ -1227,7 +1239,7 @@ public partial class MainWindow : Window
 
         if (_searchMatches.Count == 0)
         {
-            SearchResultText.Text = "일치하는 문자가 없습니다.";
+            ResetSearchResultUi("일치하는 문자가 없습니다.");
             return;
         }
 
@@ -1237,7 +1249,9 @@ public partial class MainWindow : Window
         _searchIndex = _searchMatches[_searchMatchListIndex];
 
         string totalLabel = $"{_searchMatches.Count:N0}{(_searchMatchesTruncated ? "+" : string.Empty)}";
-        SearchResultText.Text = $"{_searchMatchListIndex + 1:N0} / {totalLabel} · 문자 위치 {_searchIndex + 1:N0}";
+        SearchResultSummary.Visibility = Visibility.Visible;
+        SearchResultCountText.Text = $"{_searchMatchListIndex + 1:N0}/{totalLabel}";
+        SearchResultText.Text = $"문자 위치 {_searchIndex + 1:N0}";
         if (IsPageMode)
         {
             _currentPageIndex = FindPageContaining(_searchIndex);
@@ -1261,6 +1275,13 @@ public partial class MainWindow : Window
             MaximumSearchMatches);
         _searchMatches.AddRange(result.Matches);
         _searchMatchesTruncated = result.IsTruncated;
+    }
+
+    private void ResetSearchResultUi(string message)
+    {
+        SearchResultSummary.Visibility = Visibility.Collapsed;
+        SearchResultCountText.Text = "0/0";
+        SearchResultText.Text = message;
     }
 
     private void CurrentPositionButton_Click(object sender, RoutedEventArgs e)
@@ -2116,7 +2137,10 @@ public partial class MainWindow : Window
         _lastSearchQuery = string.Empty;
         _searchMatches.Clear();
         _searchMatchesTruncated = false;
-        SearchResultText.Text = string.Empty;
+        _searchMatchListIndex = -1;
+        ResetSearchResultUi(string.IsNullOrEmpty(SearchTextBox.Text)
+            ? "검색어를 입력하세요."
+            : "Enter 또는 다음 버튼으로 검색하세요.");
         QueueViewerSettingsSave();
     }
 
